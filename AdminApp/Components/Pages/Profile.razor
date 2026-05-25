@@ -1,7 +1,7 @@
 @page "/profile"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @rendermode InteractiveServer
-@inject ApplicationDbContext Db
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @using Microsoft.AspNetCore.Identity
@@ -153,34 +153,37 @@ else
 
     private async Task LoadCounter()
     {
-        var c = await Db.UserCounters.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.UserCounters.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == user!.Id);
         counterValue = c?.Count ?? 0;
         counterUpdatedAt = c?.UpdatedAt;
     }
 
     private async Task IncrementCounter()
     {
-        var c = await Db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
         if (c == null)
         {
             c = new UserCounter { UserId = user!.Id, Count = 0 };
-            Db.UserCounters.Add(c);
+            db.UserCounters.Add(c);
         }
         c.Count++;
         c.UpdatedAt = DateTime.UtcNow;
-        await Db.SaveChangesAsync();
+        await db.SaveChangesAsync();
         counterValue = c.Count;
         counterUpdatedAt = c.UpdatedAt;
     }
 
     private async Task ResetCounter()
     {
-        var c = await Db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
         if (c != null)
         {
             c.Count = 0;
             c.UpdatedAt = DateTime.UtcNow;
-            await Db.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
         counterValue = 0;
         counterUpdatedAt = c?.UpdatedAt;

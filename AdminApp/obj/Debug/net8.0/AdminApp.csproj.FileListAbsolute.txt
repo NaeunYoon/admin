@@ -108,3 +108,4 @@ C:\Users\whale\admin\AdminApp\obj\Debug\net8.0\refint\AdminApp.dll
 C:\Users\whale\admin\AdminApp\obj\Debug\net8.0\AdminApp.pdb
 C:\Users\whale\admin\AdminApp\obj\Debug\net8.0\AdminApp.genruntimeconfig.cache
 C:\Users\whale\admin\AdminApp\obj\Debug\net8.0\ref\AdminApp.dll
+C:\Users\whale\admin\AdminApp\obj\Debug\net8.0\AdminApp.sourcelink.json

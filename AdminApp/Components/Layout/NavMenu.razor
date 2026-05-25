@@ -20,37 +20,41 @@
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="profile">
+                @* ---------- 개인정보 그룹 (접이식) ---------- *@
+                <details class="nav-group" open>
+                    <summary class="nav-group-title px-3">
                         <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> 개인정보
-                    </NavLink>
-                </div>
+                    </summary>
+                    <div class="nav-item px-3 ps-4">
+                        <NavLink class="nav-link" href="profile">내 정보</NavLink>
+                    </div>
+                    <div class="nav-item px-3 ps-4">
+                        <NavLink class="nav-link" href="requests">연차 / 포상 상신</NavLink>
+                    </div>
+                </details>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="requests">
-                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> 연차/포상 상신
-                    </NavLink>
-                </div>
-
+                @* ---------- 관리자 그룹 (접이식, Admin 전용) ---------- *@
                 <AuthorizeView Roles="Admin" Context="adminCtx">
                     <Authorized>
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="admin/requests">
-                                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> 신청 관리
-                            </NavLink>
-                        </div>
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="admin/users">
-                                <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> 직원 관리
-                            </NavLink>
-                        </div>
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="admin/employees/new">
-                                <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> 직원 등록
-                            </NavLink>
-                        </div>
+                        <details class="nav-group nav-group-admin" open>
+                            <summary class="nav-group-title px-3">
+                                <span class="bi bi-lock-nav-menu" aria-hidden="true"></span> 관리자
+                                <span class="badge bg-warning text-dark ms-1">ADMIN</span>
+                            </summary>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="admin/requests">신청 관리</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="admin/users">직원 관리 / 정보 수정</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="admin/employees/new">직원 등록</NavLink>
+                            </div>
+                        </details>
                     </Authorized>
                 </AuthorizeView>
+
+                <hr class="text-secondary my-2" />
 
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Manage">
@@ -78,6 +82,29 @@
         </AuthorizeView>
     </nav>
 </div>
+
+<style>
+    .nav-group { padding: 0; }
+    .nav-group-title {
+        list-style: none;
+        cursor: pointer;
+        color: rgba(255,255,255,0.85);
+        padding-top: 0.6rem;
+        padding-bottom: 0.6rem;
+        font-size: 0.95rem;
+        user-select: none;
+    }
+    .nav-group-title::-webkit-details-marker { display: none; }
+    .nav-group-title::before {
+        content: "▸";
+        display: inline-block;
+        margin-right: 6px;
+        transition: transform 0.15s;
+    }
+    .nav-group[open] > .nav-group-title::before { transform: rotate(90deg); }
+    .nav-group-title:hover { background-color: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav-group-admin > .nav-group-title { color: #ffd35c; }
+</style>
 
 @code {
     private string? currentUrl;

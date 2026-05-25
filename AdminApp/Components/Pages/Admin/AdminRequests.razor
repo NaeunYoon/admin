@@ -1,7 +1,7 @@
 @page "/admin/requests"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
-@inject ApplicationDbContext Db
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 
@@ -232,10 +232,11 @@
 
     private async Task LoadAll()
     {
-        leaves = await Db.LeaveRequests.AsNoTracking().OrderBy(l => l.StartDate).ThenBy(l => l.CreatedAt).ToListAsync();
-        rewards = await Db.RewardRecords.AsNoTracking().OrderBy(r => r.CreatedAt).ToListAsync();
-        supplies = await Db.SupplyRequests.AsNoTracking().OrderBy(s => s.CreatedAt).ToListAsync();
-        allUsers = await Db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        leaves = await db.LeaveRequests.AsNoTracking().OrderBy(l => l.StartDate).ThenBy(l => l.CreatedAt).ToListAsync();
+        rewards = await db.RewardRecords.AsNoTracking().OrderBy(r => r.CreatedAt).ToListAsync();
+        supplies = await db.SupplyRequests.AsNoTracking().OrderBy(s => s.CreatedAt).ToListAsync();
+        allUsers = await db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
     }
 
     private IEnumerable<LeaveRequest> FilteredLeaves =>
@@ -247,82 +248,98 @@
 
     private async Task ApproveLeave(LeaveRequest l)
     {
-        var target = await Db.LeaveRequests.FindAsync(l.Id);
-        if (target == null || target.Status != "대기") return;
-
-        var u = await UserManager.FindByIdAsync(target.UserId);
-        if (u != null)
+        await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            switch (target.LeaveType)
-            {
-                case "연차":
-                case "반차": u.UsedAnnualLeave += target.Days; break;
-                case "병가": u.SickLeaveUsed += target.Days; break;
-                case "포상휴가": u.UsedRewardLeave += target.Days; break;
-            }
-            u.UpdatedAt = DateTime.UtcNow;
-            await UserManager.UpdateAsync(u);
-        }
+            var target = await db.LeaveRequests.FindAsync(l.Id);
+            if (target == null || target.Status != "대기") return;
 
-        target.Status = "승인";
-        target.ApprovedById = adminId;
-        target.ApprovedByName = adminName;
-        target.ApprovedAt = DateTime.UtcNow;
-        await Db.SaveChangesAsync();
+            var u = await UserManager.FindByIdAsync(target.UserId);
+            if (u != null)
+            {
+                switch (target.LeaveType)
+                {
+                    case "연차":
+                    case "반차":
+                    case "반반차": u.UsedAnnualLeave += target.Days; break;
+                    case "병가": u.SickLeaveUsed += target.Days; break;
+                    case "포상휴가": u.UsedRewardLeave += target.Days; break;
+                }
+                u.UpdatedAt = DateTime.UtcNow;
+                await UserManager.UpdateAsync(u);
+            }
+
+            target.Status = "승인";
+            target.ApprovedById = adminId;
+            target.ApprovedByName = adminName;
+            target.ApprovedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
         await LoadAll();
     }
 
     private async Task RejectLeave(LeaveRequest l)
     {
-        var target = await Db.LeaveRequests.FindAsync(l.Id);
-        if (target == null) return;
-        target.Status = "반려";
-        target.ApprovedById = adminId;
-        target.ApprovedByName = adminName;
-        target.ApprovedAt = DateTime.UtcNow;
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            var target = await db.LeaveRequests.FindAsync(l.Id);
+            if (target == null) return;
+            target.Status = "반려";
+            target.ApprovedById = adminId;
+            target.ApprovedByName = adminName;
+            target.ApprovedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
         await LoadAll();
     }
 
     private async Task ApproveReward(RewardRecord r)
     {
-        var target = await Db.RewardRecords.FindAsync(r.Id);
-        if (target == null || target.Status != "대기") return;
-
-        var u = await UserManager.FindByIdAsync(target.UserId);
-        if (u != null)
+        await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            u.RewardLeave += target.Amount;
-            u.UpdatedAt = DateTime.UtcNow;
-            await UserManager.UpdateAsync(u);
-        }
+            var target = await db.RewardRecords.FindAsync(r.Id);
+            if (target == null || target.Status != "대기") return;
 
-        target.Status = "승인";
-        target.ApprovedById = adminId;
-        target.ApprovedByName = adminName;
-        target.ApprovedAt = DateTime.UtcNow;
-        await Db.SaveChangesAsync();
+            var u = await UserManager.FindByIdAsync(target.UserId);
+            if (u != null)
+            {
+                u.RewardLeave += target.Amount;
+                u.UpdatedAt = DateTime.UtcNow;
+                await UserManager.UpdateAsync(u);
+            }
+
+            target.Status = "승인";
+            target.ApprovedById = adminId;
+            target.ApprovedByName = adminName;
+            target.ApprovedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
         await LoadAll();
     }
 
     private async Task RejectReward(RewardRecord r)
     {
-        var target = await Db.RewardRecords.FindAsync(r.Id);
-        if (target == null) return;
-        target.Status = "반려";
-        target.ApprovedById = adminId;
-        target.ApprovedByName = adminName;
-        target.ApprovedAt = DateTime.UtcNow;
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            var target = await db.RewardRecords.FindAsync(r.Id);
+            if (target == null) return;
+            target.Status = "반려";
+            target.ApprovedById = adminId;
+            target.ApprovedByName = adminName;
+            target.ApprovedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
         await LoadAll();
     }
 
     private async Task SetSupplyStatus(SupplyRequest s, string status)
     {
-        var target = await Db.SupplyRequests.FindAsync(s.Id);
-        if (target == null) return;
-        target.Status = status;
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            var target = await db.SupplyRequests.FindAsync(s.Id);
+            if (target == null) return;
+            target.Status = status;
+            await db.SaveChangesAsync();
+        }
         await LoadAll();
     }
 
@@ -357,12 +374,15 @@
             ApprovedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };
-        Db.RewardRecords.Add(rec);
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.RewardRecords.Add(rec);
+            await db.SaveChangesAsync();
+        }
 
         u.RewardLeave += grantAmount;
         u.UpdatedAt = DateTime.UtcNow;
         await UserManager.UpdateAsync(u);
-        await Db.SaveChangesAsync();
 
         granting = false;
         await LoadAll();

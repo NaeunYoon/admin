@@ -10,6 +10,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
     public DbSet<RewardRecord> RewardRecords => Set<RewardRecord>();
     public DbSet<SupplyRequest> SupplyRequests => Set<SupplyRequest>();
+    public DbSet<CompanyEvent> CompanyEvents => Set<CompanyEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

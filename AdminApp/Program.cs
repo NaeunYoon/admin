@@ -29,11 +29,16 @@ public class Program
             })
             .AddIdentityCookies();
 
-        // DB
+        // DB — Blazor Server 동시성 문제 회피를 위해 DbContextFactory 사용.
+        // 컴포넌트는 IDbContextFactory로 작업마다 독립 컨텍스트를 생성하고,
+        // Identity(UserManager 등)는 팩토리에서 만든 scoped 컨텍스트를 사용.
         var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        builder.Services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseMySql(connectionString, new MariaDbServerVersion(new Version(10, 11, 0))));
+        var serverVersion = new MariaDbServerVersion(new Version(10, 11, 0));
+        builder.Services.AddDbContextFactory<ApplicationDbContext>(options =>
+            options.UseMySql(connectionString, serverVersion));
+        builder.Services.AddScoped<ApplicationDbContext>(sp =>
+            sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
         // Identity + Roles

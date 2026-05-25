@@ -1,7 +1,7 @@
 @page "/requests"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @rendermode InteractiveServer
-@inject ApplicationDbContext Db
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 
@@ -36,7 +36,7 @@
                         </div>
                         <div class="col-6">
                             <label class="form-label">종료일</label>
-                            <input type="date" class="form-control" @bind="endDate" disabled="@(leaveType == "반차")" />
+                            <input type="date" class="form-control" @bind="endDate" disabled="@(leaveType is "반차" or "반반차")" />
                         </div>
                     </div>
 
@@ -173,7 +173,7 @@
 @code {
     private ApplicationUser? user;
 
-    private readonly string[] leaveTypes = { "연차", "반차", "병가", "포상휴가" };
+    private readonly string[] leaveTypes = { "연차", "반차", "반반차", "병가", "포상휴가" };
     private string leaveType = "연차";
     private DateOnly startDate = DateOnly.FromDateTime(DateTime.Today);
     private DateOnly endDate = DateOnly.FromDateTime(DateTime.Today);
@@ -199,10 +199,11 @@
     private async Task LoadHistory()
     {
         if (user == null) return;
-        myLeaves = await Db.LeaveRequests.AsNoTracking()
+        await using var db = await DbFactory.CreateDbContextAsync();
+        myLeaves = await db.LeaveRequests.AsNoTracking()
             .Where(l => l.UserId == user.Id)
             .OrderByDescending(l => l.CreatedAt).ToListAsync();
-        myRewards = await Db.RewardRecords.AsNoTracking()
+        myRewards = await db.RewardRecords.AsNoTracking()
             .Where(r => r.UserId == user.Id)
             .OrderByDescending(r => r.CreatedAt).ToListAsync();
     }
@@ -210,6 +211,7 @@
     private decimal CalcLeaveDays()
     {
         if (leaveType == "반차") return 0.5m;
+        if (leaveType == "반반차") return 0.25m;
         var days = (endDate.DayNumber - startDate.DayNumber) + 1;
         return days < 1 ? 0 : days;
     }
@@ -233,14 +235,17 @@
             UserName = user.KoreanName ?? user.Email,
             LeaveType = leaveType,
             StartDate = startDate,
-            EndDate = leaveType == "반차" ? startDate : endDate,
+            EndDate = leaveType is "반차" or "반반차" ? startDate : endDate,
             Reason = string.IsNullOrWhiteSpace(leaveReason) ? "개인사유" : leaveReason,
             Days = days,
             Status = "대기",
             CreatedAt = DateTime.UtcNow
         };
-        Db.LeaveRequests.Add(req);
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.LeaveRequests.Add(req);
+            await db.SaveChangesAsync();
+        }
 
         leaveMsg = "휴가 상신이 접수되었습니다. (승인 대기)";
         leaveReason = "개인사유";
@@ -265,8 +270,11 @@
             Status = "대기",
             CreatedAt = DateTime.UtcNow
         };
-        Db.RewardRecords.Add(rec);
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.RewardRecords.Add(rec);
+            await db.SaveChangesAsync();
+        }
 
         rewardMsg = "포상 상신이 접수되었습니다. (승인 대기)";
         workHours = 0;

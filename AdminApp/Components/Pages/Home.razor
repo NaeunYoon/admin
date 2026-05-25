@@ -1,12 +1,15 @@
 @page "/"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @rendermode InteractiveServer
-@inject ApplicationDbContext Db
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>공지사항</PageTitle>
 
 <div class="container-fluid py-3">
+    <h2 class="mb-3">📅 사내 일정</h2>
+    <CalendarPanel />
+
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
         <h2 class="mb-0">📢 공지사항</h2>
         <AuthorizeView Roles="Admin">
@@ -190,7 +193,8 @@
 
     private async Task LoadNotices()
     {
-        notices = await Db.Notices
+        await using var db = await DbFactory.CreateDbContextAsync();
+        notices = await db.Notices
             .AsNoTracking()
             .OrderByDescending(n => n.IsPinned)
             .ThenByDescending(n => n.CreatedAt)
@@ -199,7 +203,8 @@
 
     private async Task LoadSupplies()
     {
-        supplies = await Db.SupplyRequests
+        await using var db = await DbFactory.CreateDbContextAsync();
+        supplies = await db.SupplyRequests
             .AsNoTracking()
             .OrderByDescending(s => s.CreatedAt)
             .Take(50)
@@ -215,8 +220,11 @@
         supplyEditing.UserName = currentUserName;
         supplyEditing.Status = "대기";
         supplyEditing.CreatedAt = DateTime.UtcNow;
-        Db.SupplyRequests.Add(supplyEditing);
-        await Db.SaveChangesAsync();
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.SupplyRequests.Add(supplyEditing);
+            await db.SaveChangesAsync();
+        }
         supplyEditing = null;
         await LoadSupplies();
     }
@@ -241,38 +249,44 @@
         if (editing == null) return;
         if (string.IsNullOrWhiteSpace(editing.Title)) return;
 
-        if (editing.Id == 0)
+        await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            editing.AuthorId = currentUserId;
-            editing.AuthorName = currentUserName;
-            editing.CreatedAt = DateTime.UtcNow;
-            editing.UpdatedAt = DateTime.UtcNow;
-            Db.Notices.Add(editing);
-        }
-        else
-        {
-            var target = await Db.Notices.FindAsync(editing.Id);
-            if (target != null)
+            if (editing.Id == 0)
             {
-                target.Title = editing.Title;
-                target.Content = editing.Content;
-                target.IsPinned = editing.IsPinned;
-                target.UpdatedAt = DateTime.UtcNow;
+                editing.AuthorId = currentUserId;
+                editing.AuthorName = currentUserName;
+                editing.CreatedAt = DateTime.UtcNow;
+                editing.UpdatedAt = DateTime.UtcNow;
+                db.Notices.Add(editing);
             }
+            else
+            {
+                var target = await db.Notices.FindAsync(editing.Id);
+                if (target != null)
+                {
+                    target.Title = editing.Title;
+                    target.Content = editing.Content;
+                    target.IsPinned = editing.IsPinned;
+                    target.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            await db.SaveChangesAsync();
         }
-        await Db.SaveChangesAsync();
         editing = null;
         await LoadNotices();
     }
 
     private async Task DeleteNotice(Notice n)
     {
-        var target = await Db.Notices.FindAsync(n.Id);
-        if (target != null)
+        await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            Db.Notices.Remove(target);
-            await Db.SaveChangesAsync();
-            await LoadNotices();
+            var target = await db.Notices.FindAsync(n.Id);
+            if (target != null)
+            {
+                db.Notices.Remove(target);
+                await db.SaveChangesAsync();
+            }
         }
+        await LoadNotices();
     }
 }
