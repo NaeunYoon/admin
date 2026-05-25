@@ -63,47 +63,22 @@ else
             </div>
         </div>
 
-        @* ----- 상세 정보 ----- *@
+        @* ----- 기본 정보 ----- *@
         <div class="row g-3 mt-1">
-            <div class="col-12 col-lg-6">
+            <div class="col-12 col-lg-8">
                 <div class="card shadow-sm border-0 h-100">
                     <div class="card-body">
                         <h6 class="card-title">기본 정보</h6>
                         <dl class="row mb-0 small">
                             <dt class="col-4 text-muted">사번</dt><dd class="col-8">@(user.EmployeeNumber ?? "-")</dd>
-                            <dt class="col-4 text-muted">이름</dt><dd class="col-8">@user.KoreanName (@user.EnglishName)</dd>
+                            <dt class="col-4 text-muted">이름</dt><dd class="col-8">@user.KoreanName @(string.IsNullOrEmpty(user.EnglishName) ? "" : $"({user.EnglishName})")</dd>
                             <dt class="col-4 text-muted">생년월일</dt><dd class="col-8">@(user.BirthDate?.ToString("yyyy-MM-dd") ?? "-")</dd>
                             <dt class="col-4 text-muted">성별</dt><dd class="col-8">@(user.Gender ?? "-")</dd>
                             <dt class="col-4 text-muted">이메일</dt><dd class="col-8">@user.Email</dd>
                             <dt class="col-4 text-muted">휴대전화</dt><dd class="col-8">@(user.PhoneNumber ?? "-")</dd>
-                            <dt class="col-4 text-muted">주소</dt><dd class="col-8">@(user.Address) @(user.AddressDetail)</dd>
-                            <dt class="col-4 text-muted">비상연락처</dt><dd class="col-8">@(user.EmergencyContact ?? "-") @(string.IsNullOrEmpty(user.EmergencyContactRelation) ? "" : $"({user.EmergencyContactRelation})")</dd>
-                        </dl>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-lg-6">
-                <div class="card shadow-sm border-0 h-100">
-                    <div class="card-body">
-                        <h6 class="card-title">고용 정보</h6>
-                        <dl class="row mb-0 small">
                             <dt class="col-4 text-muted">부서</dt><dd class="col-8">@(user.Department ?? "-")</dd>
                             <dt class="col-4 text-muted">직급/직무</dt><dd class="col-8">@(user.Rank ?? "-") / @(user.Position ?? "-")</dd>
-                            <dt class="col-4 text-muted">고용형태</dt><dd class="col-8">@(user.EmploymentType ?? "-")</dd>
-                            <dt class="col-4 text-muted">근무지</dt><dd class="col-8">@(user.WorkLocation ?? "-")</dd>
                             <dt class="col-4 text-muted">입사일</dt><dd class="col-8">@(user.HireDate?.ToString("yyyy-MM-dd") ?? "-")</dd>
-                            <dt class="col-4 text-muted">재직여부</dt>
-                            <dd class="col-8">
-                                @if (user.IsActive)
-                                {
-                                    <span class="badge bg-success">재직</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-secondary">퇴사 (@user.ResignationDate?.ToString("yyyy-MM-dd"))</span>
-                                }
-                            </dd>
-                            <dt class="col-4 text-muted">최종학력</dt><dd class="col-8">@(user.LastEducation ?? "-") @(user.LastSchool) @(user.Major)</dd>
                         </dl>
                     </div>
                 </div>

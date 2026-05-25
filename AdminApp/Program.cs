@@ -91,12 +91,23 @@ public class Program
         // app.UseHttpsRedirection();
 
         app.UseStaticFiles();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseAntiforgery();
 
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
 
         app.MapAdditionalIdentityEndpoints();
+
+        // 공지 첨부파일 다운로드 (로그인 필요)
+        app.MapGet("/notices/attachments/{id:int}", async (int id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var att = await db.NoticeAttachments.FindAsync(id);
+            if (att == null) return Results.NotFound();
+            return Results.File(att.Content, att.ContentType ?? "application/octet-stream", att.FileName);
+        }).RequireAuthorization();
 
         app.Run();
     }

@@ -3,99 +3,161 @@
 @rendermode InteractiveServer
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
 
-<PageTitle>공지사항</PageTitle>
+<PageTitle>홈</PageTitle>
 
 <div class="container-fluid py-3">
-    <h2 class="mb-3">📅 사내 일정</h2>
-    <CalendarPanel />
-
-    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-        <h2 class="mb-0">📢 공지사항</h2>
-        <AuthorizeView Roles="Admin">
-            <Authorized>
-                <button class="btn btn-primary" @onclick="OpenNew">+ 공지 작성</button>
-            </Authorized>
-        </AuthorizeView>
-    </div>
-
-    @if (notices == null)
-    {
-        <p>로딩 중...</p>
-    }
-    else if (notices.Count == 0)
-    {
-        <div class="text-center text-muted py-5">
-            <div class="fs-1">📭</div>
-            <p>등록된 공지사항이 없습니다.</p>
-        </div>
-    }
-    else
-    {
-        @foreach (var n in notices)
-        {
-            <div class="card shadow-sm border-0 mb-3">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <h5 class="card-title mb-1">
-                            @if (n.IsPinned)
-                            {
-                                <span class="badge bg-danger me-1">고정</span>
-                            }
-                            @n.Title
-                        </h5>
-                        <AuthorizeView Roles="Admin">
-                            <Authorized>
-                                <div class="btn-group btn-group-sm">
-                                    <button class="btn btn-outline-secondary" @onclick="() => OpenEdit(n)">수정</button>
-                                    <button class="btn btn-outline-danger" @onclick="() => DeleteNotice(n)">삭제</button>
-                                </div>
-                            </Authorized>
-                        </AuthorizeView>
+    <div class="row g-3">
+        @* ================= 왼쪽: 공지사항 대시보드 ================= *@
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="mb-0 fs-4">📢 공지사항</h2>
+                        <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 공지 작성</button>
                     </div>
-                    <small class="text-muted">@n.AuthorName · @n.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small>
-                    <p class="card-text mt-2 mb-0" style="white-space: pre-wrap;">@n.Content</p>
+
+                    @if (notices == null)
+                    {
+                        <p>로딩 중...</p>
+                    }
+                    else if (notices.Count == 0)
+                    {
+                        <div class="text-center text-muted py-5 flex-grow-1">
+                            <div class="fs-1">📭</div>
+                            <p>등록된 공지사항이 없습니다.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush flex-grow-1">
+                            @foreach (var n in PagedNotices)
+                            {
+                                <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0"
+                                    style="cursor: pointer;" @onclick="() => GoToNotice(n.Id)">
+                                    <span class="text-truncate me-2">
+                                        @if (n.IsPinned)
+                                        {
+                                            <span class="badge bg-danger me-1">고정</span>
+                                        }
+                                        @n.Title
+                                    </span>
+                                    <small class="text-muted text-nowrap">@n.CreatedAt.ToLocalTime().ToString("MM-dd")</small>
+                                </li>
+                            }
+                        </ul>
+
+                        @if (TotalPages > 1)
+                        {
+                            <nav class="mt-3">
+                                <ul class="pagination pagination-sm justify-content-center mb-0">
+                                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                                        <button class="page-link" @onclick="() => GoToPage(currentPage - 1)">‹</button>
+                                    </li>
+                                    @for (int p = 1; p <= TotalPages; p++)
+                                    {
+                                        var pageNum = p;
+                                        <li class="page-item @(pageNum == currentPage ? "active" : "")">
+                                            <button class="page-link" @onclick="() => GoToPage(pageNum)">@pageNum</button>
+                                        </li>
+                                    }
+                                    <li class="page-item @(currentPage == TotalPages ? "disabled" : "")">
+                                        <button class="page-link" @onclick="() => GoToPage(currentPage + 1)">›</button>
+                                    </li>
+                                </ul>
+                            </nav>
+                        }
+                    }
                 </div>
             </div>
-        }
-    }
+        </div>
 
-    @* ---------- 비품 / 간식 요청 ---------- *@
-    <hr class="my-4" />
-    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-        <h4 class="mb-0">🧾 비품 / 간식 요청</h4>
-        <button class="btn btn-outline-primary btn-sm" @onclick="OpenSupply">+ 요청하기</button>
+        @* ================= 오른쪽: 사내 일정(캘린더) ================= *@
+        <div class="col-12 col-lg-6">
+            <h2 class="fs-4 mb-3">📅 사내 일정</h2>
+            <CalendarPanel />
+        </div>
     </div>
 
-    <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle">
-            <thead class="table-light">
-                <tr><th>신청일</th><th>신청자</th><th>분류</th><th>품목</th><th>수량</th><th>메모</th><th>상태</th></tr>
-            </thead>
-            <tbody>
-                @if (supplies == null || supplies.Count == 0)
-                {
-                    <tr><td colspan="7" class="text-center text-muted">요청 내역이 없습니다.</td></tr>
-                }
-                else
-                {
-                    @foreach (var s in supplies)
-                    {
-                        <tr>
-                            <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small></td>
-                            <td>@s.UserName</td>
-                            <td>@s.Category</td>
-                            <td>@s.ItemName</td>
-                            <td>@s.Quantity</td>
-                            <td><small>@s.Note</small></td>
-                            <td>
-                                <span class="badge @(s.Status switch { "승인" => "bg-success", "완료" => "bg-primary", "반려" => "bg-danger", _ => "bg-secondary" })">@s.Status</span>
-                            </td>
-                        </tr>
-                    }
-                }
-            </tbody>
-        </table>
+    @* ================= 비품 / 간식 요청 (2컬럼) ================= *@
+    <hr class="my-4" />
+    <div class="row g-3">
+        @* 왼쪽: 비품 요청 *@
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0 fs-5">🧾 비품 요청</h4>
+                        <button class="btn btn-outline-primary btn-sm" @onclick='() => OpenSupply("비품")'>+ 요청하기</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr><th>신청일</th><th>신청자</th><th>품목</th><th>수량</th><th>상태</th></tr>
+                            </thead>
+                            <tbody>
+                                @if (SuppliesOf("비품").Count == 0)
+                                {
+                                    <tr><td colspan="5" class="text-center text-muted">요청 내역이 없습니다.</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var s in SuppliesOf("비품"))
+                                    {
+                                        <tr>
+                                            <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
+                                            <td>@s.UserName</td>
+                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
+                                            <td>@s.Quantity</td>
+                                            <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* 오른쪽: 간식 요청 *@
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0 fs-5">🍪 간식 요청</h4>
+                        <button class="btn btn-outline-primary btn-sm" @onclick='() => OpenSupply("간식")'>+ 요청하기</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr><th>신청일</th><th>신청자</th><th>품목</th><th>수량</th><th>상태</th></tr>
+                            </thead>
+                            <tbody>
+                                @if (SuppliesOf("간식").Count == 0)
+                                {
+                                    <tr><td colspan="5" class="text-center text-muted">요청 내역이 없습니다.</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var s in SuppliesOf("간식"))
+                                    {
+                                        <tr>
+                                            <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
+                                            <td>@s.UserName</td>
+                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
+                                            <td>@s.Quantity</td>
+                                            <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -106,7 +168,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">비품 / 간식 요청</h5>
+                    <h5 class="modal-title">@supplyEditing.Category 요청</h5>
                     <button type="button" class="btn-close" @onclick="() => supplyEditing = null"></button>
                 </div>
                 <div class="modal-body">
@@ -139,14 +201,14 @@
     </div>
 }
 
-@* ---------- 공지 작성/수정 모달 ---------- *@
+@* ---------- 공지 작성 모달 ---------- *@
 @if (editing != null)
 {
     <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(editing.Id == 0 ? "공지 작성" : "공지 수정")</h5>
+                    <h5 class="modal-title">공지 작성</h5>
                     <button type="button" class="btn-close" @onclick="Cancel"></button>
                 </div>
                 <div class="modal-body">
@@ -158,6 +220,26 @@
                         <label class="form-label">내용</label>
                         <textarea class="form-control" rows="6" @bind="editing.Content"></textarea>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">첨부파일 <small class="text-muted">(파일당 최대 10MB, 최대 5개)</small></label>
+                        <InputFile class="form-control" OnChange="OnFilesSelected" multiple />
+                        @if (pendingFiles.Count > 0)
+                        {
+                            <ul class="list-group list-group-flush mt-2">
+                                @foreach (var f in pendingFiles)
+                                {
+                                    <li class="list-group-item px-0 py-1 d-flex justify-content-between">
+                                        <small>📎 @f.Name</small>
+                                        <small class="text-muted">@FormatSize(f.Bytes.Length)</small>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (!string.IsNullOrEmpty(uploadError))
+                        {
+                            <div class="text-danger small mt-1">@uploadError</div>
+                        }
+                    </div>
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="pin" @bind="editing.IsPinned" />
                         <label class="form-check-label" for="pin">상단 고정</label>
@@ -165,7 +247,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="Cancel">취소</button>
-                    <button class="btn btn-primary" @onclick="Save">저장</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
                 </div>
             </div>
         </div>
@@ -180,6 +262,20 @@
 
     private List<SupplyRequest>? supplies;
     private SupplyRequest? supplyEditing;
+
+    // 페이징
+    private const int pageSize = 10;
+    private int currentPage = 1;
+    private int TotalPages => notices == null ? 1 : Math.Max(1, (int)Math.Ceiling(notices.Count / (double)pageSize));
+    private IEnumerable<Notice> PagedNotices =>
+        (notices ?? new()).Skip((currentPage - 1) * pageSize).Take(pageSize);
+
+    // 첨부파일 업로드
+    private record PendingFile(string Name, string ContentType, byte[] Bytes);
+    private readonly List<PendingFile> pendingFiles = new();
+    private string? uploadError;
+    private bool saving;
+    private const long MaxFileSize = 10 * 1024 * 1024;
 
     protected override async Task OnInitializedAsync()
     {
@@ -199,6 +295,7 @@
             .OrderByDescending(n => n.IsPinned)
             .ThenByDescending(n => n.CreatedAt)
             .ToListAsync();
+        if (currentPage > TotalPages) currentPage = TotalPages;
     }
 
     private async Task LoadSupplies()
@@ -207,11 +304,31 @@
         supplies = await db.SupplyRequests
             .AsNoTracking()
             .OrderByDescending(s => s.CreatedAt)
-            .Take(50)
+            .Take(100)
             .ToListAsync();
     }
 
-    private void OpenSupply() => supplyEditing = new SupplyRequest { Quantity = 1, Category = "비품" };
+    private void GoToNotice(int id) => Nav.NavigateTo($"/notices/{id}");
+
+    private void GoToPage(int page)
+    {
+        if (page < 1 || page > TotalPages) return;
+        currentPage = page;
+    }
+
+    private List<SupplyRequest> SuppliesOf(string category) =>
+        (supplies ?? new()).Where(s => s.Category == category).ToList();
+
+    private static string StatusClass(string status) => status switch
+    {
+        "승인" => "bg-success",
+        "완료" => "bg-primary",
+        "반려" => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private void OpenSupply(string category) =>
+        supplyEditing = new SupplyRequest { Quantity = 1, Category = category };
 
     private async Task SaveSupply()
     {
@@ -229,64 +346,80 @@
         await LoadSupplies();
     }
 
-    private void OpenNew() => editing = new Notice();
-
-    private void OpenEdit(Notice n) => editing = new Notice
+    private void OpenNew()
     {
-        Id = n.Id,
-        Title = n.Title,
-        Content = n.Content,
-        IsPinned = n.IsPinned,
-        AuthorId = n.AuthorId,
-        AuthorName = n.AuthorName,
-        CreatedAt = n.CreatedAt
-    };
+        editing = new Notice();
+        pendingFiles.Clear();
+        uploadError = null;
+    }
 
-    private void Cancel() => editing = null;
+    private void Cancel()
+    {
+        editing = null;
+        pendingFiles.Clear();
+        uploadError = null;
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        uploadError = null;
+        pendingFiles.Clear();
+        foreach (var file in e.GetMultipleFiles(maximumFileCount: 5))
+        {
+            if (file.Size > MaxFileSize)
+            {
+                uploadError = $"'{file.Name}' 파일이 10MB를 초과합니다.";
+                continue;
+            }
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(MaxFileSize).CopyToAsync(ms);
+            pendingFiles.Add(new PendingFile(file.Name, file.ContentType, ms.ToArray()));
+        }
+    }
 
     private async Task Save()
     {
-        if (editing == null) return;
-        if (string.IsNullOrWhiteSpace(editing.Title)) return;
-
-        await using (var db = await DbFactory.CreateDbContextAsync())
+        if (editing == null || string.IsNullOrWhiteSpace(editing.Title)) return;
+        saving = true;
+        try
         {
-            if (editing.Id == 0)
-            {
-                editing.AuthorId = currentUserId;
-                editing.AuthorName = currentUserName;
-                editing.CreatedAt = DateTime.UtcNow;
-                editing.UpdatedAt = DateTime.UtcNow;
-                db.Notices.Add(editing);
-            }
-            else
-            {
-                var target = await db.Notices.FindAsync(editing.Id);
-                if (target != null)
-                {
-                    target.Title = editing.Title;
-                    target.Content = editing.Content;
-                    target.IsPinned = editing.IsPinned;
-                    target.UpdatedAt = DateTime.UtcNow;
-                }
-            }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            editing.AuthorId = currentUserId;
+            editing.AuthorName = currentUserName;
+            editing.CreatedAt = DateTime.UtcNow;
+            editing.UpdatedAt = DateTime.UtcNow;
+            db.Notices.Add(editing);
             await db.SaveChangesAsync();
-        }
-        editing = null;
-        await LoadNotices();
-    }
 
-    private async Task DeleteNotice(Notice n)
-    {
-        await using (var db = await DbFactory.CreateDbContextAsync())
-        {
-            var target = await db.Notices.FindAsync(n.Id);
-            if (target != null)
+            if (pendingFiles.Count > 0)
             {
-                db.Notices.Remove(target);
+                foreach (var f in pendingFiles)
+                {
+                    db.NoticeAttachments.Add(new NoticeAttachment
+                    {
+                        NoticeId = editing.Id,
+                        FileName = f.Name,
+                        ContentType = f.ContentType,
+                        Size = f.Bytes.Length,
+                        Content = f.Bytes,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
                 await db.SaveChangesAsync();
             }
         }
+        finally
+        {
+            saving = false;
+        }
+        editing = null;
+        pendingFiles.Clear();
+        currentPage = 1;
         await LoadNotices();
     }
+
+    private static string FormatSize(long bytes) =>
+        bytes < 1024 ? $"{bytes} B"
+        : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB"
+        : $"{bytes / (1024.0 * 1024):0.#} MB";
 }

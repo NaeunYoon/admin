@@ -158,32 +158,6 @@
                                         <div class="col-md-4"><label class="form-label">이메일</label><input class="form-control" readonly value="@editing.Email" /></div>
                                         <div class="col-md-6"><label class="form-label">주소</label><input class="form-control" @bind="editing.Address" /></div>
                                         <div class="col-md-6"><label class="form-label">상세 주소</label><input class="form-control" @bind="editing.AddressDetail" /></div>
-                                        <div class="col-md-6"><label class="form-label">비상 연락처</label><input class="form-control" @bind="editing.EmergencyContact" /></div>
-                                        <div class="col-md-6"><label class="form-label">비상 연락처 관계</label><input class="form-control" placeholder="부모/배우자/형제 등" @bind="editing.EmergencyContactRelation" /></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        @* ----- 학력 ----- *@
-                        <div class="accordion-item">
-                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec3">학력</button></h2>
-                            <div id="sec3" class="accordion-collapse collapse">
-                                <div class="accordion-body">
-                                    <div class="row g-3">
-                                        <div class="col-md-4">
-                                            <label class="form-label">최종 학력</label>
-                                            <select class="form-select" @bind="editing.LastEducation">
-                                                <option value="">선택</option>
-                                                <option value="고졸">고졸</option>
-                                                <option value="전문대졸">전문대졸</option>
-                                                <option value="대졸">대졸</option>
-                                                <option value="석사">석사</option>
-                                                <option value="박사">박사</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-4"><label class="form-label">학교명</label><input class="form-control" @bind="editing.LastSchool" /></div>
-                                        <div class="col-md-4"><label class="form-label">전공</label><input class="form-control" @bind="editing.Major" /></div>
                                     </div>
                                 </div>
                             </div>
@@ -252,16 +226,15 @@
                             </div>
                         </div>
 
-                        @* ----- 급여/계좌 ----- *@
+                        @* ----- 계좌 정보 ----- *@
                         <div class="accordion-item">
-                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec6">급여 / 계좌 <small class="text-danger ms-2">(민감)</small></button></h2>
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec6">계좌 정보 <small class="text-danger ms-2">(민감)</small></button></h2>
                             <div id="sec6" class="accordion-collapse collapse">
                                 <div class="accordion-body">
                                     <div class="row g-3">
-                                        <div class="col-md-3"><label class="form-label">연봉 (원)</label><input type="number" step="100000" class="form-control" @bind="editing.Salary" /></div>
-                                        <div class="col-md-3"><label class="form-label">은행</label><input class="form-control" @bind="editing.BankName" /></div>
-                                        <div class="col-md-3"><label class="form-label">계좌번호</label><input class="form-control" @bind="editing.BankAccount" /></div>
-                                        <div class="col-md-3"><label class="form-label">예금주</label><input class="form-control" @bind="editing.AccountHolder" /></div>
+                                        <div class="col-md-4"><label class="form-label">은행</label><input class="form-control" @bind="editing.BankName" /></div>
+                                        <div class="col-md-4"><label class="form-label">계좌번호</label><input class="form-control" @bind="editing.BankAccount" /></div>
+                                        <div class="col-md-4"><label class="form-label">예금주</label><input class="form-control" @bind="editing.AccountHolder" /></div>
                                     </div>
                                 </div>
                             </div>
