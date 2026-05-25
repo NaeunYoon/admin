@@ -1,0 +1,576 @@
+@page "/admin/users"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>직원 관리</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0">직원 관리</h2>
+        <div class="d-flex gap-2 flex-grow-1 flex-md-grow-0 justify-content-end">
+            <div class="input-group" style="max-width: 360px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input class="form-control" placeholder="이름/이메일/사번/부서 검색"
+                       value="@searchTerm" @oninput="OnSearchChanged" />
+            </div>
+            <a class="btn btn-primary text-nowrap" href="admin/employees/new">+ 직원 등록</a>
+        </div>
+    </div>
+
+    @if (users == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th class="d-none d-md-table-cell">사번</th>
+                        <th>이름</th>
+                        <th class="d-none d-lg-table-cell">이메일</th>
+                        <th class="d-none d-md-table-cell">부서/직급</th>
+                        <th class="d-none d-xl-table-cell">고용형태</th>
+                        <th class="d-none d-lg-table-cell">입사일</th>
+                        <th class="d-none d-xl-table-cell">년차</th>
+                        <th>연차</th>
+                        <th class="d-none d-md-table-cell">포상</th>
+                        <th>상태</th>
+                        <th>역할</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in FilteredUsers)
+                    {
+                        <tr>
+                            <td class="d-none d-md-table-cell"><small>@(u.EmployeeNumber ?? "-")</small></td>
+                            <td>
+                                <strong>@(u.KoreanName ?? "-")</strong>
+                                @if (!string.IsNullOrEmpty(u.EnglishName))
+                                {
+                                    <small class="text-muted d-block">@u.EnglishName</small>
+                                }
+                            </td>
+                            <td class="d-none d-lg-table-cell"><small class="text-muted">@u.Email</small></td>
+                            <td class="d-none d-md-table-cell">
+                                <div>@(u.Department ?? "-")</div>
+                                <small class="text-muted">@(u.Rank ?? u.Position ?? "-")</small>
+                            </td>
+                            <td class="d-none d-xl-table-cell"><small>@(u.EmploymentType ?? "-")</small></td>
+                            <td class="d-none d-lg-table-cell">@(u.HireDate?.ToString("yyyy-MM-dd") ?? "-")</td>
+                            <td class="d-none d-xl-table-cell">@(u.YearsOfService?.ToString() ?? "-")</td>
+                            <td>
+                                <span class="badge bg-primary">@Fmt.Day(u.RemainingAnnualLeave)</span>
+                                <small class="text-muted">/@Fmt.Day(u.TotalAnnualLeave)</small>
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <span class="badge bg-success">@Fmt.Day(u.RemainingRewardLeave)</span>
+                                <small class="text-muted">/@Fmt.Day(u.RewardLeave)</small>
+                            </td>
+                            <td>
+                                @if (u.IsActive)
+                                {
+                                    <span class="badge bg-success">재직</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">퇴사</span>
+                                }
+                            </td>
+                            <td>
+                                @foreach (var role in GetRoles(u.Id))
+                                {
+                                    <span class="badge bg-info text-dark me-1">@role</span>
+                                }
+                            </td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => EditUser(u)">편집</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenHistory(u)">내역</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <small class="text-muted">총 @users.Count 명 · 현재 표시 @FilteredUsers.Count() 명</small>
+    }
+</div>
+
+@* ---------------- 편집 모달 ---------------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(editing.KoreanName ?? editing.Email) 정보 편집
+                        @if (!string.IsNullOrEmpty(editing.EmployeeNumber))
+                        {
+                            <small class="text-muted ms-2">사번 @editing.EmployeeNumber</small>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CancelEdit"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="accordion" id="editAcc">
+                        @* ----- 기본정보 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec1">기본정보</button></h2>
+                            <div id="sec1" class="accordion-collapse collapse show">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3"><label class="form-label">사번</label><input class="form-control" @bind="editing.EmployeeNumber" /></div>
+                                        <div class="col-md-3"><label class="form-label">한글 이름</label><input class="form-control" @bind="editing.KoreanName" /></div>
+                                        <div class="col-md-3"><label class="form-label">영문 이름</label><input class="form-control" @bind="editing.EnglishName" /></div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">성별</label>
+                                            <select class="form-select" @bind="editing.Gender">
+                                                <option value="">선택</option>
+                                                <option value="남">남</option>
+                                                <option value="여">여</option>
+                                                <option value="기타">기타</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3"><label class="form-label">생년월일</label><input type="date" class="form-control" @bind="editing.BirthDate" /></div>
+                                        <div class="col-md-6"><label class="form-label">주민등록번호 <small class="text-danger">(민감)</small></label><input class="form-control" placeholder="940220-2123456" @bind="editing.ResidentRegistrationNumber" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 연락처 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec2">연락처</button></h2>
+                            <div id="sec2" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-4"><label class="form-label">휴대전화</label><input class="form-control" @bind="editing.PhoneNumber" /></div>
+                                        <div class="col-md-4"><label class="form-label">우편번호</label><input class="form-control" @bind="editing.PostalCode" /></div>
+                                        <div class="col-md-4"><label class="form-label">이메일</label><input class="form-control" readonly value="@editing.Email" /></div>
+                                        <div class="col-md-6"><label class="form-label">주소</label><input class="form-control" @bind="editing.Address" /></div>
+                                        <div class="col-md-6"><label class="form-label">상세 주소</label><input class="form-control" @bind="editing.AddressDetail" /></div>
+                                        <div class="col-md-6"><label class="form-label">비상 연락처</label><input class="form-control" @bind="editing.EmergencyContact" /></div>
+                                        <div class="col-md-6"><label class="form-label">비상 연락처 관계</label><input class="form-control" placeholder="부모/배우자/형제 등" @bind="editing.EmergencyContactRelation" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 학력 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec3">학력</button></h2>
+                            <div id="sec3" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label">최종 학력</label>
+                                            <select class="form-select" @bind="editing.LastEducation">
+                                                <option value="">선택</option>
+                                                <option value="고졸">고졸</option>
+                                                <option value="전문대졸">전문대졸</option>
+                                                <option value="대졸">대졸</option>
+                                                <option value="석사">석사</option>
+                                                <option value="박사">박사</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4"><label class="form-label">학교명</label><input class="form-control" @bind="editing.LastSchool" /></div>
+                                        <div class="col-md-4"><label class="form-label">전공</label><input class="form-control" @bind="editing.Major" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 고용정보 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec4">고용정보</button></h2>
+                            <div id="sec4" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-4"><label class="form-label">입사일</label><input type="date" class="form-control" @bind="editing.HireDate" /></div>
+                                        <div class="col-md-4"><label class="form-label">퇴사일 <small class="text-muted">(재직중이면 비움)</small></label><input type="date" class="form-control" @bind="editing.ResignationDate" /></div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">고용 형태</label>
+                                            <select class="form-select" @bind="editing.EmploymentType">
+                                                <option value="">선택</option>
+                                                <option value="정규직">정규직</option>
+                                                <option value="계약직">계약직</option>
+                                                <option value="인턴">인턴</option>
+                                                <option value="파트타임">파트타임</option>
+                                                <option value="프리랜서">프리랜서</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3"><label class="form-label">부서</label><input class="form-control" @bind="editing.Department" /></div>
+                                        <div class="col-md-3"><label class="form-label">직무</label><input class="form-control" @bind="editing.Position" /></div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">직급</label>
+                                            <select class="form-select" @bind="editing.Rank">
+                                                <option value="">선택</option>
+                                                <option value="사원">사원</option>
+                                                <option value="주임">주임</option>
+                                                <option value="대리">대리</option>
+                                                <option value="과장">과장</option>
+                                                <option value="차장">차장</option>
+                                                <option value="부장">부장</option>
+                                                <option value="이사">이사</option>
+                                                <option value="대표">대표</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3"><label class="form-label">근무지</label><input class="form-control" placeholder="본사/지사/재택" @bind="editing.WorkLocation" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 휴가 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec5">휴가</button></h2>
+                            <div id="sec5" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <label class="form-label">총 연차
+                                                <button type="button" class="btn btn-link btn-sm p-0 ms-1" @onclick="ApplyStatutoryLeave">(법정 @editing.StatutoryAnnualLeave 적용)</button>
+                                            </label>
+                                            <input type="number" step="0.5" class="form-control" @bind="editing.TotalAnnualLeave" />
+                                        </div>
+                                        <div class="col-md-3"><label class="form-label">사용 연차</label><input type="number" step="0.5" class="form-control" @bind="editing.UsedAnnualLeave" /></div>
+                                        <div class="col-md-3"><label class="form-label">포상휴가</label><input type="number" step="0.5" class="form-control" @bind="editing.RewardLeave" /></div>
+                                        <div class="col-md-3"><label class="form-label">사용 포상</label><input type="number" step="0.5" class="form-control" @bind="editing.UsedRewardLeave" /></div>
+                                        <div class="col-md-3"><label class="form-label">병가 총량</label><input type="number" step="0.5" class="form-control" @bind="editing.SickLeaveTotal" /></div>
+                                        <div class="col-md-3"><label class="form-label">사용 병가</label><input type="number" step="0.5" class="form-control" @bind="editing.SickLeaveUsed" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 급여/계좌 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec6">급여 / 계좌 <small class="text-danger ms-2">(민감)</small></button></h2>
+                            <div id="sec6" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3"><label class="form-label">연봉 (원)</label><input type="number" step="100000" class="form-control" @bind="editing.Salary" /></div>
+                                        <div class="col-md-3"><label class="form-label">은행</label><input class="form-control" @bind="editing.BankName" /></div>
+                                        <div class="col-md-3"><label class="form-label">계좌번호</label><input class="form-control" @bind="editing.BankAccount" /></div>
+                                        <div class="col-md-3"><label class="form-label">예금주</label><input class="form-control" @bind="editing.AccountHolder" /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* ----- 기타 + 역할 ----- *@
+                        <div class="accordion-item">
+                            <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec7">기타 / 역할</button></h2>
+                            <div id="sec7" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-6"><label class="form-label">프로필 사진 URL</label><input class="form-control" @bind="editing.ProfilePhotoUrl" /></div>
+                                        <div class="col-12"><label class="form-label">인사 메모</label><textarea class="form-control" rows="3" @bind="editing.Notes"></textarea></div>
+                                        <div class="col-12">
+                                            <label class="form-label">역할</label>
+                                            <div>
+                                                @foreach (var role in availableRoles)
+                                                {
+                                                    <div class="form-check form-check-inline">
+                                                        <input class="form-check-input" type="checkbox"
+                                                               id="role-@role"
+                                                               checked="@selectedRoles.Contains(role)"
+                                                               @onchange="(e) => ToggleRole(role, (bool)e.Value!)" />
+                                                        <label class="form-check-label" for="role-@role">@role</label>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(saveMessage))
+                    {
+                        <div class="alert alert-info mt-3 mb-0">@saveMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelEdit">취소</button>
+                    <button class="btn btn-primary" @onclick="SaveEdit">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- 내역 모달 ---------------- *@
+@if (historyUser != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(historyUser.KoreanName ?? historyUser.Email) 내역</h5>
+                    <button type="button" class="btn-close" @onclick="CloseHistory"></button>
+                </div>
+                <div class="modal-body">
+                    <h6 class="text-muted">휴가 내역</h6>
+                    <div class="table-responsive mb-4">
+                        <table class="table table-sm align-middle">
+                            <thead class="table-light"><tr><th>신청일</th><th>종류</th><th>기간</th><th>일수</th><th>사유</th><th>상태</th></tr></thead>
+                            <tbody>
+                                @if (historyLeaves == null || historyLeaves.Count == 0)
+                                {
+                                    <tr><td colspan="6" class="text-center text-muted">없음</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var l in historyLeaves)
+                                    {
+                                        <tr>
+                                            <td><small>@l.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</small></td>
+                                            <td>@l.LeaveType</td>
+                                            <td><small>@l.StartDate.ToString("MM-dd")@(l.StartDate != l.EndDate ? $" ~ {l.EndDate:MM-dd}" : "")</small></td>
+                                            <td>@Fmt.Day(l.Days)</td>
+                                            <td><small>@l.Reason</small></td>
+                                            <td><span class="badge @(l.Status switch { "승인" => "bg-success", "반려" => "bg-danger", _ => "bg-secondary" })">@l.Status</span></td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h6 class="text-muted">포상 내역</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead class="table-light"><tr><th>신청일</th><th>포상 일수</th><th>근무시간</th><th>사유</th><th>구분</th><th>상태</th></tr></thead>
+                            <tbody>
+                                @if (historyRewards == null || historyRewards.Count == 0)
+                                {
+                                    <tr><td colspan="6" class="text-center text-muted">없음</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var r in historyRewards)
+                                    {
+                                        <tr>
+                                            <td><small>@r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</small></td>
+                                            <td>@Fmt.Day(r.Amount)</td>
+                                            <td>@Fmt.Day(r.WorkHours)</td>
+                                            <td><small>@r.Reason</small></td>
+                                            <td><small>@r.Source</small></td>
+                                            <td><span class="badge @(r.Status switch { "승인" => "bg-success", "반려" => "bg-danger", _ => "bg-secondary" })">@r.Status</span></td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseHistory">닫기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ApplicationUser>? users;
+    private Dictionary<string, List<string>> userRoles = new();
+    private string searchTerm = "";
+    private ApplicationUser? editing;
+    private HashSet<string> selectedRoles = new();
+    private readonly string[] availableRoles = new[] { "Admin", "Employee" };
+    private string? saveMessage;
+
+    // 내역 모달
+    private ApplicationUser? historyUser;
+    private List<LeaveRequest>? historyLeaves;
+    private List<RewardRecord>? historyRewards;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        users = await Db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
+        userRoles.Clear();
+        foreach (var u in users)
+        {
+            var roles = await UserManager.GetRolesAsync(u);
+            userRoles[u.Id] = roles.ToList();
+        }
+    }
+
+    private IEnumerable<ApplicationUser> FilteredUsers =>
+        string.IsNullOrWhiteSpace(searchTerm)
+            ? users ?? Enumerable.Empty<ApplicationUser>()
+            : (users ?? new()).Where(u =>
+                (u.KoreanName ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (u.Email ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (u.EmployeeNumber ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (u.Department ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyList<string> GetRoles(string userId) =>
+        userRoles.TryGetValue(userId, out var r) ? r : Array.Empty<string>();
+
+    private void OnSearchChanged(ChangeEventArgs e) => searchTerm = e.Value?.ToString() ?? "";
+
+    private void EditUser(ApplicationUser u)
+    {
+        editing = new ApplicationUser
+        {
+            Id = u.Id,
+            UserName = u.UserName,
+            Email = u.Email,
+            PhoneNumber = u.PhoneNumber,
+            EmployeeNumber = u.EmployeeNumber,
+            KoreanName = u.KoreanName,
+            EnglishName = u.EnglishName,
+            BirthDate = u.BirthDate,
+            Gender = u.Gender,
+            ResidentRegistrationNumber = u.ResidentRegistrationNumber,
+            PostalCode = u.PostalCode,
+            Address = u.Address,
+            AddressDetail = u.AddressDetail,
+            EmergencyContact = u.EmergencyContact,
+            EmergencyContactRelation = u.EmergencyContactRelation,
+            LastEducation = u.LastEducation,
+            LastSchool = u.LastSchool,
+            Major = u.Major,
+            HireDate = u.HireDate,
+            ResignationDate = u.ResignationDate,
+            Department = u.Department,
+            Position = u.Position,
+            Rank = u.Rank,
+            EmploymentType = u.EmploymentType,
+            WorkLocation = u.WorkLocation,
+            TotalAnnualLeave = u.TotalAnnualLeave,
+            UsedAnnualLeave = u.UsedAnnualLeave,
+            RewardLeave = u.RewardLeave,
+            UsedRewardLeave = u.UsedRewardLeave,
+            SickLeaveTotal = u.SickLeaveTotal,
+            SickLeaveUsed = u.SickLeaveUsed,
+            Salary = u.Salary,
+            BankName = u.BankName,
+            BankAccount = u.BankAccount,
+            AccountHolder = u.AccountHolder,
+            ProfilePhotoUrl = u.ProfilePhotoUrl,
+            Notes = u.Notes,
+            CreatedAt = u.CreatedAt,
+            UpdatedAt = u.UpdatedAt
+        };
+        selectedRoles = new HashSet<string>(GetRoles(u.Id));
+        saveMessage = null;
+    }
+
+    private void ToggleRole(string role, bool isChecked)
+    {
+        if (isChecked) selectedRoles.Add(role);
+        else selectedRoles.Remove(role);
+    }
+
+    private async Task SaveEdit()
+    {
+        if (editing == null) return;
+
+        var target = await UserManager.FindByIdAsync(editing.Id);
+        if (target == null) { saveMessage = "사용자를 찾을 수 없습니다."; return; }
+
+        target.PhoneNumber = editing.PhoneNumber;
+        target.EmployeeNumber = editing.EmployeeNumber;
+        target.KoreanName = editing.KoreanName;
+        target.EnglishName = editing.EnglishName;
+        target.BirthDate = editing.BirthDate;
+        target.Gender = editing.Gender;
+        target.ResidentRegistrationNumber = editing.ResidentRegistrationNumber;
+        target.PostalCode = editing.PostalCode;
+        target.Address = editing.Address;
+        target.AddressDetail = editing.AddressDetail;
+        target.EmergencyContact = editing.EmergencyContact;
+        target.EmergencyContactRelation = editing.EmergencyContactRelation;
+        target.LastEducation = editing.LastEducation;
+        target.LastSchool = editing.LastSchool;
+        target.Major = editing.Major;
+        target.HireDate = editing.HireDate;
+        target.ResignationDate = editing.ResignationDate;
+        target.Department = editing.Department;
+        target.Position = editing.Position;
+        target.Rank = editing.Rank;
+        target.EmploymentType = editing.EmploymentType;
+        target.WorkLocation = editing.WorkLocation;
+        target.TotalAnnualLeave = editing.TotalAnnualLeave;
+        target.UsedAnnualLeave = editing.UsedAnnualLeave;
+        target.RewardLeave = editing.RewardLeave;
+        target.UsedRewardLeave = editing.UsedRewardLeave;
+        target.SickLeaveTotal = editing.SickLeaveTotal;
+        target.SickLeaveUsed = editing.SickLeaveUsed;
+        target.Salary = editing.Salary;
+        target.BankName = editing.BankName;
+        target.BankAccount = editing.BankAccount;
+        target.AccountHolder = editing.AccountHolder;
+        target.ProfilePhotoUrl = editing.ProfilePhotoUrl;
+        target.Notes = editing.Notes;
+        target.UpdatedAt = DateTime.UtcNow;
+
+        var result = await UserManager.UpdateAsync(target);
+        if (!result.Succeeded)
+        {
+            saveMessage = "저장 실패: " + string.Join(", ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        // 역할 업데이트
+        var currentRoles = await UserManager.GetRolesAsync(target);
+        var toRemove = currentRoles.Except(selectedRoles).ToArray();
+        var toAdd = selectedRoles.Except(currentRoles).ToArray();
+        if (toRemove.Length > 0) await UserManager.RemoveFromRolesAsync(target, toRemove);
+        if (toAdd.Length > 0) await UserManager.AddToRolesAsync(target, toAdd);
+
+        editing = null;
+        await LoadUsers();
+    }
+
+    private void CancelEdit()
+    {
+        editing = null;
+        saveMessage = null;
+    }
+
+    private void ApplyStatutoryLeave()
+    {
+        if (editing != null)
+        {
+            editing.TotalAnnualLeave = editing.StatutoryAnnualLeave;
+        }
+    }
+
+    private async Task OpenHistory(ApplicationUser u)
+    {
+        historyUser = u;
+        historyLeaves = await Db.LeaveRequests.AsNoTracking()
+            .Where(l => l.UserId == u.Id)
+            .OrderByDescending(l => l.CreatedAt).ToListAsync();
+        historyRewards = await Db.RewardRecords.AsNoTracking()
+            .Where(r => r.UserId == u.Id)
+            .OrderByDescending(r => r.CreatedAt).ToListAsync();
+    }
+
+    private void CloseHistory()
+    {
+        historyUser = null;
+        historyLeaves = null;
+        historyRewards = null;
+    }
+}

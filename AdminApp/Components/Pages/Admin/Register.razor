@@ -1,0 +1,311 @@
+@page "/admin/employees/new"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<ApplicationUser> UserManager
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Identity
+@using AdminApp.Data
+@using AdminApp.Helpers
+
+<PageTitle>직원 등록</PageTitle>
+
+<div class="container py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0">직원 등록</h2>
+        <a class="btn btn-outline-secondary" href="admin/users">목록으로</a>
+    </div>
+
+    @if (result is { Success: true })
+    {
+        <div class="alert alert-success">
+            <h5 class="mb-3">✅ 직원 등록 완료</h5>
+            <p class="mb-2">직원 <strong>@result.UserKoreanName</strong> 님에게 아래 정보를 전달해주세요.</p>
+            <div class="bg-light p-3 rounded">
+                <div><strong>로그인 ID (이메일):</strong> <code class="user-select-all">@result.Email</code></div>
+                <div class="mt-1"><strong>임시 비밀번호:</strong> <code class="user-select-all">@result.TempPassword</code></div>
+            </div>
+            <small class="text-muted d-block mt-2">⚠️ 임시 비밀번호는 주민등록번호 앞 6자리입니다. 최초 로그인 후 본인이 비밀번호를 변경하도록 안내해주세요.</small>
+            <div class="mt-3">
+                <button class="btn btn-primary me-2" @onclick="ResetForm">새 직원 등록</button>
+                <a class="btn btn-outline-secondary" href="admin/users">직원 목록 보기</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (result is { Success: false })
+        {
+            <div class="alert alert-danger">
+                <strong>등록 실패</strong>
+                <ul class="mb-0">
+                    @foreach (var err in result.Errors)
+                    {
+                        <li>@err</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h6 class="text-muted">필수 정보</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">한글 이름 <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="form.KoreanName" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">이메일 (로그인 ID) <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" @bind="form.Email" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">
+                            주민등록번호 <span class="text-danger">*</span>
+                            <small class="text-muted">(앞 6자리 = 임시 비밀번호)</small>
+                        </label>
+                        <input class="form-control" placeholder="940220-2123456"
+                               @bind="form.ResidentRegistrationNumber"
+                               @bind:event="oninput"
+                               @bind:after="OnRrnChanged" />
+                    </div>
+
+                    @if (parsedBirth != null || parsedGender != null)
+                    {
+                        <div class="col-12">
+                            <div class="alert alert-info py-2 mb-0">
+                                자동 추출:
+                                @if (parsedBirth != null) { <span> 생년월일 <strong>@parsedBirth.Value.ToString("yyyy-MM-dd")</strong> (만 @CalcAge(parsedBirth.Value) 세)</span> }
+                                @if (parsedGender != null) { <span class="ms-3">성별 <strong>@parsedGender</strong></span> }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <hr class="my-4" />
+
+                <h6 class="text-muted">고용 정보</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">사번</label>
+                        <input class="form-control" @bind="form.EmployeeNumber" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">입사일</label>
+                        <input type="date" class="form-control" @bind="form.HireDate" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">고용 형태</label>
+                        <select class="form-select" @bind="form.EmploymentType">
+                            <option value="정규직">정규직</option>
+                            <option value="계약직">계약직</option>
+                            <option value="인턴">인턴</option>
+                            <option value="파트타임">파트타임</option>
+                            <option value="프리랜서">프리랜서</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">부서</label>
+                        <input class="form-control" @bind="form.Department" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">직무</label>
+                        <input class="form-control" @bind="form.Position" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">직급</label>
+                        <select class="form-select" @bind="form.Rank">
+                            <option value="">선택</option>
+                            <option value="사원">사원</option>
+                            <option value="주임">주임</option>
+                            <option value="대리">대리</option>
+                            <option value="과장">과장</option>
+                            <option value="차장">차장</option>
+                            <option value="부장">부장</option>
+                            <option value="이사">이사</option>
+                            <option value="대표">대표</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">근무지</label>
+                        <input class="form-control" placeholder="본사/지사/재택" @bind="form.WorkLocation" />
+                    </div>
+                </div>
+
+                <hr class="my-4" />
+
+                <h6 class="text-muted">연락처 (선택)</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">영문 이름</label>
+                        <input class="form-control" @bind="form.EnglishName" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">휴대전화</label>
+                        <input class="form-control" placeholder="010-1234-5678" @bind="form.PhoneNumber" />
+                    </div>
+                </div>
+
+                @if (form.HireDate.HasValue)
+                {
+                    <div class="alert alert-secondary mt-4 mb-0">
+                        등록 시 자동 설정될 항목:
+                        <ul class="mb-0">
+                            <li>법정 연차: <strong>@ApplicationUser.CalculateStatutoryAnnualLeave(form.HireDate.Value) 일</strong> (입사일 기준)</li>
+                            <li>역할: <strong>Employee</strong></li>
+                            <li>생성일: 현재 시각</li>
+                        </ul>
+                    </div>
+                }
+
+                <div class="d-flex gap-2 mt-4">
+                    <button class="btn btn-primary" @onclick="Submit" disabled="@submitting">
+                        @(submitting ? "처리 중..." : "직원 등록")
+                    </button>
+                    <button class="btn btn-link" @onclick="ResetForm">초기화</button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private FormModel form = new() { HireDate = DateOnly.FromDateTime(DateTime.Today), EmploymentType = "정규직" };
+    private RegisterResult? result;
+    private bool submitting;
+    private DateOnly? parsedBirth;
+    private string? parsedGender;
+
+    private void OnRrnChanged()
+    {
+        var (birth, gender) = ResidentNumberHelper.Parse(form.ResidentRegistrationNumber ?? "");
+        parsedBirth = birth;
+        parsedGender = gender;
+    }
+
+    private static int CalcAge(DateOnly birth)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var age = today.Year - birth.Year;
+        if (today < birth.AddYears(age)) age--;
+        return age;
+    }
+
+    private async Task Submit()
+    {
+        if (submitting) return;
+        submitting = true;
+
+        try
+        {
+            var errors = new List<string>();
+            if (string.IsNullOrWhiteSpace(form.KoreanName)) errors.Add("한글 이름을 입력해주세요.");
+            if (string.IsNullOrWhiteSpace(form.Email)) errors.Add("이메일을 입력해주세요.");
+            if (string.IsNullOrWhiteSpace(form.ResidentRegistrationNumber)) errors.Add("주민등록번호를 입력해주세요.");
+
+            var tempPassword = ResidentNumberHelper.ExtractTempPassword(form.ResidentRegistrationNumber);
+            if (tempPassword.Length < 6) errors.Add("주민등록번호 앞 6자리(생년월일)가 필요합니다.");
+
+            // 이메일 중복 체크
+            if (!string.IsNullOrWhiteSpace(form.Email))
+            {
+                var exists = await UserManager.FindByEmailAsync(form.Email);
+                if (exists != null) errors.Add("이미 등록된 이메일입니다.");
+            }
+
+            if (errors.Count > 0)
+            {
+                result = new RegisterResult { Success = false, Errors = errors };
+                return;
+            }
+
+            var (birth, gender) = ResidentNumberHelper.Parse(form.ResidentRegistrationNumber!);
+
+            var user = new ApplicationUser
+            {
+                UserName = form.Email!,
+                Email = form.Email,
+                EmailConfirmed = true,
+                EmployeeNumber = form.EmployeeNumber,
+                KoreanName = form.KoreanName,
+                EnglishName = form.EnglishName,
+                BirthDate = birth,
+                Gender = gender,
+                ResidentRegistrationNumber = form.ResidentRegistrationNumber,
+                PhoneNumber = form.PhoneNumber,
+                HireDate = form.HireDate,
+                EmploymentType = form.EmploymentType,
+                Department = form.Department,
+                Position = form.Position,
+                Rank = form.Rank,
+                WorkLocation = form.WorkLocation,
+                TotalAnnualLeave = form.HireDate.HasValue
+                    ? ApplicationUser.CalculateStatutoryAnnualLeave(form.HireDate.Value)
+                    : 15m,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            var createResult = await UserManager.CreateAsync(user, tempPassword);
+            if (!createResult.Succeeded)
+            {
+                result = new RegisterResult
+                {
+                    Success = false,
+                    Errors = createResult.Errors.Select(e => e.Description).ToList()
+                };
+                return;
+            }
+
+            await UserManager.AddToRoleAsync(user, "Employee");
+
+            result = new RegisterResult
+            {
+                Success = true,
+                UserKoreanName = form.KoreanName!,
+                Email = form.Email!,
+                TempPassword = tempPassword
+            };
+        }
+        catch (Exception ex)
+        {
+            result = new RegisterResult { Success = false, Errors = new() { "오류: " + ex.Message } };
+        }
+        finally
+        {
+            submitting = false;
+        }
+    }
+
+    private void ResetForm()
+    {
+        form = new FormModel { HireDate = DateOnly.FromDateTime(DateTime.Today), EmploymentType = "정규직" };
+        result = null;
+        parsedBirth = null;
+        parsedGender = null;
+    }
+
+    private class FormModel
+    {
+        public string? KoreanName { get; set; }
+        public string? Email { get; set; }
+        public string? ResidentRegistrationNumber { get; set; }
+        public string? EmployeeNumber { get; set; }
+        public string? EnglishName { get; set; }
+        public string? PhoneNumber { get; set; }
+        public DateOnly? HireDate { get; set; }
+        public string? EmploymentType { get; set; } = "정규직";
+        public string? Department { get; set; }
+        public string? Position { get; set; }
+        public string? Rank { get; set; }
+        public string? WorkLocation { get; set; }
+    }
+
+    private class RegisterResult
+    {
+        public bool Success { get; set; }
+        public string? UserKoreanName { get; set; }
+        public string? Email { get; set; }
+        public string? TempPassword { get; set; }
+        public List<string> Errors { get; set; } = new();
+    }
+}

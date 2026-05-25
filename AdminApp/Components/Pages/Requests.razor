@@ -1,0 +1,288 @@
+@page "/requests"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>연차/포상 상신</PageTitle>
+
+<div class="container-fluid py-3">
+    <h2 class="mb-4">연차 / 포상 상신</h2>
+
+    <div class="row g-3">
+        @* ---------- 휴가 상신 ---------- *@
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <h5 class="card-title">휴가 상신</h5>
+
+                    <div class="mb-3">
+                        <label class="form-label">휴가 종류</label>
+                        <div>
+                            @foreach (var t in leaveTypes)
+                            {
+                                <input type="radio" class="btn-check" name="ltype" id="lt-@t"
+                                       checked="@(leaveType == t)" @onchange="() => leaveType = t" autocomplete="off" />
+                                <label class="btn btn-outline-primary btn-sm me-1 mb-1" for="lt-@t">@t</label>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">시작일</label>
+                            <input type="date" class="form-control" @bind="startDate" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">종료일</label>
+                            <input type="date" class="form-control" @bind="endDate" disabled="@(leaveType == "반차")" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">사유 <small class="text-muted">(클릭하면 수정 가능)</small></label>
+                        <input class="form-control" @bind="leaveReason"
+                               readonly="@(!reasonEditable)"
+                               @onclick="() => reasonEditable = true" />
+                    </div>
+
+                    <div class="alert alert-light py-2">
+                        차감 예정 일수: <strong>@Fmt.Day(CalcLeaveDays())</strong> 일
+                        @if (leaveType is "연차" or "반차")
+                        {
+                            <span class="text-muted ms-2">(남은 연차 @Fmt.Day(user?.RemainingAnnualLeave ?? 0)일)</span>
+                        }
+                        else if (leaveType == "포상휴가")
+                        {
+                            <span class="text-muted ms-2">(남은 포상 @Fmt.Day(user?.RemainingRewardLeave ?? 0)일)</span>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(leaveMsg))
+                    {
+                        <div class="alert alert-info py-2">@leaveMsg</div>
+                    }
+
+                    <button class="btn btn-primary" @onclick="SubmitLeave">휴가 상신</button>
+                </div>
+            </div>
+        </div>
+
+        @* ---------- 포상 상신 ---------- *@
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <h5 class="card-title">포상 상신</h5>
+                    <p class="text-muted small mb-3">추가근무 시간을 입력하면 1.2배로 포상이 계산됩니다. 직접 수정도 가능합니다.</p>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">추가근무 시간</label>
+                            <input type="number" step="0.5" class="form-control" @bind="workHours" @bind:after="CalcReward" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">포상 일수 <small class="text-muted">(시간×1.2÷8)</small></label>
+                            <input type="number" step="0.01" class="form-control" @bind="rewardAmount" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">사유</label>
+                        <input class="form-control" placeholder="예: 3/15 출시 대응 야근" @bind="rewardReason" />
+                    </div>
+
+                    <div class="alert alert-light py-2">
+                        계산: @Fmt.Day(workHours) 시간 × 1.2 = @Fmt.Day(workHours * 1.2m) 시간 ÷ 8 = <strong>@Fmt.Day(workHours * 1.2m / 8m)</strong> 일
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(rewardMsg))
+                    {
+                        <div class="alert alert-info py-2">@rewardMsg</div>
+                    }
+
+                    <button class="btn btn-success" @onclick="SubmitReward">포상 상신</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* ---------- 내 상신 현황 ---------- *@
+    <h4 class="mt-4 mb-3">내 상신 현황</h4>
+
+    <h6 class="text-muted">휴가</h6>
+    <div class="table-responsive mb-4">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr><th>신청일</th><th>종류</th><th>기간</th><th>일수</th><th>사유</th><th>상태</th><th>승인자</th></tr>
+            </thead>
+            <tbody>
+                @if (myLeaves == null || myLeaves.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-center text-muted">신청 내역 없음</td></tr>
+                }
+                else
+                {
+                    @foreach (var l in myLeaves)
+                    {
+                        <tr>
+                            <td><small>@l.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small></td>
+                            <td>@l.LeaveType</td>
+                            <td><small>@l.StartDate.ToString("MM-dd")@(l.StartDate != l.EndDate ? $" ~ {l.EndDate:MM-dd}" : "")</small></td>
+                            <td>@Fmt.Day(l.Days)</td>
+                            <td><small>@l.Reason</small></td>
+                            <td>@StatusBadge(l.Status)</td>
+                            <td><small>@(l.ApprovedByName ?? "-")</small></td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h6 class="text-muted">포상</h6>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr><th>신청일</th><th>포상 일수</th><th>근무시간</th><th>사유</th><th>구분</th><th>상태</th></tr>
+            </thead>
+            <tbody>
+                @if (myRewards == null || myRewards.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-center text-muted">신청 내역 없음</td></tr>
+                }
+                else
+                {
+                    @foreach (var r in myRewards)
+                    {
+                        <tr>
+                            <td><small>@r.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small></td>
+                            <td>@Fmt.Day(r.Amount)</td>
+                            <td>@Fmt.Day(r.WorkHours)</td>
+                            <td><small>@r.Reason</small></td>
+                            <td><small>@r.Source</small></td>
+                            <td>@StatusBadge(r.Status)</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private ApplicationUser? user;
+
+    private readonly string[] leaveTypes = { "연차", "반차", "병가", "포상휴가" };
+    private string leaveType = "연차";
+    private DateOnly startDate = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly endDate = DateOnly.FromDateTime(DateTime.Today);
+    private string leaveReason = "개인사유";
+    private bool reasonEditable;
+    private string? leaveMsg;
+
+    private decimal workHours;
+    private decimal rewardAmount;
+    private string rewardReason = "";
+    private string? rewardMsg;
+
+    private List<LeaveRequest>? myLeaves;
+    private List<RewardRecord>? myRewards;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        user = await UserManager.GetUserAsync(authState.User);
+        await LoadHistory();
+    }
+
+    private async Task LoadHistory()
+    {
+        if (user == null) return;
+        myLeaves = await Db.LeaveRequests.AsNoTracking()
+            .Where(l => l.UserId == user.Id)
+            .OrderByDescending(l => l.CreatedAt).ToListAsync();
+        myRewards = await Db.RewardRecords.AsNoTracking()
+            .Where(r => r.UserId == user.Id)
+            .OrderByDescending(r => r.CreatedAt).ToListAsync();
+    }
+
+    private decimal CalcLeaveDays()
+    {
+        if (leaveType == "반차") return 0.5m;
+        var days = (endDate.DayNumber - startDate.DayNumber) + 1;
+        return days < 1 ? 0 : days;
+    }
+
+    private void CalcReward()
+    {
+        rewardAmount = Math.Round(workHours * 1.2m / 8m, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private async Task SubmitLeave()
+    {
+        leaveMsg = null;
+        if (user == null) return;
+
+        var days = CalcLeaveDays();
+        if (days <= 0) { leaveMsg = "기간을 확인해주세요."; return; }
+
+        var req = new LeaveRequest
+        {
+            UserId = user.Id,
+            UserName = user.KoreanName ?? user.Email,
+            LeaveType = leaveType,
+            StartDate = startDate,
+            EndDate = leaveType == "반차" ? startDate : endDate,
+            Reason = string.IsNullOrWhiteSpace(leaveReason) ? "개인사유" : leaveReason,
+            Days = days,
+            Status = "대기",
+            CreatedAt = DateTime.UtcNow
+        };
+        Db.LeaveRequests.Add(req);
+        await Db.SaveChangesAsync();
+
+        leaveMsg = "휴가 상신이 접수되었습니다. (승인 대기)";
+        leaveReason = "개인사유";
+        reasonEditable = false;
+        await LoadHistory();
+    }
+
+    private async Task SubmitReward()
+    {
+        rewardMsg = null;
+        if (user == null) return;
+        if (rewardAmount <= 0) { rewardMsg = "포상 일수를 확인해주세요."; return; }
+
+        var rec = new RewardRecord
+        {
+            UserId = user.Id,
+            UserName = user.KoreanName ?? user.Email,
+            Amount = rewardAmount,
+            WorkHours = workHours > 0 ? workHours : null,
+            Reason = string.IsNullOrWhiteSpace(rewardReason) ? "추가근무 포상" : rewardReason,
+            Source = "직원상신",
+            Status = "대기",
+            CreatedAt = DateTime.UtcNow
+        };
+        Db.RewardRecords.Add(rec);
+        await Db.SaveChangesAsync();
+
+        rewardMsg = "포상 상신이 접수되었습니다. (승인 대기)";
+        workHours = 0;
+        rewardAmount = 0;
+        rewardReason = "";
+        await LoadHistory();
+    }
+
+    private static MarkupString StatusBadge(string status)
+    {
+        var cls = status switch
+        {
+            "승인" => "bg-success",
+            "반려" => "bg-danger",
+            _ => "bg-secondary"
+        };
+        return new MarkupString($"<span class=\"badge {cls}\">{status}</span>");
+    }
+}

@@ -1,0 +1,28 @@
+﻿services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: admin_mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 1020
+      MYSQL_DATABASE: admindb
+      MYSQL_USER: adminuser
+      MYSQL_PASSWORD: 1020
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+
+  app:
+    build:
+      context: ./AdminApp
+      dockerfile: Dockerfile
+    container_name: admin_app
+    restart: unless-stopped
+    ports:
+      - "3100:8080"
+    depends_on:
+      - mariadb
+
+volumes:
+  mariadb_data:

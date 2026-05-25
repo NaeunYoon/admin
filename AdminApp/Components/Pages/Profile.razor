@@ -1,0 +1,188 @@
+@page "/profile"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>개인정보</PageTitle>
+
+@if (user == null)
+{
+    <p>로딩 중...</p>
+}
+else
+{
+    <div class="container-fluid py-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+            <h2 class="mb-0">개인정보</h2>
+            <a class="btn btn-primary" href="requests">연차 / 포상 상신</a>
+        </div>
+
+        @* ----- 휴가 요약 카드 ----- *@
+        <div class="row g-3">
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="card shadow-sm h-100 border-0">
+                    <div class="card-body">
+                        <h6 class="text-muted">남은 연차</h6>
+                        <div class="display-6 fw-bold text-primary">@Fmt.Day(user.RemainingAnnualLeave) 일</div>
+                        <small class="text-muted">총 @Fmt.Day(user.TotalAnnualLeave) · 사용 @Fmt.Day(user.UsedAnnualLeave)</small>
+                        <div class="mt-1"><small class="text-muted">법정: @Fmt.Day(user.StatutoryAnnualLeave) 일</small></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="card shadow-sm h-100 border-0">
+                    <div class="card-body">
+                        <h6 class="text-muted">남은 포상휴가</h6>
+                        <div class="display-6 fw-bold text-success">@Fmt.Day(user.RemainingRewardLeave) 일</div>
+                        <small class="text-muted">총 @Fmt.Day(user.RewardLeave) · 사용 @Fmt.Day(user.UsedRewardLeave)</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="card shadow-sm h-100 border-0">
+                    <div class="card-body">
+                        <h6 class="text-muted">남은 병가</h6>
+                        <div class="display-6 fw-bold text-warning">@Fmt.Day(user.RemainingSickLeave) 일</div>
+                        <small class="text-muted">총 @Fmt.Day(user.SickLeaveTotal) · 사용 @Fmt.Day(user.SickLeaveUsed)</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="card shadow-sm h-100 border-0">
+                    <div class="card-body">
+                        <h6 class="text-muted">입사 년차 / 만 나이</h6>
+                        <div class="display-6 fw-bold">@(user.YearsOfService?.ToString() ?? "-")<small class="fs-5"> 년차</small></div>
+                        <small class="text-muted">만 @(user.Age?.ToString() ?? "-") 세</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ----- 상세 정보 ----- *@
+        <div class="row g-3 mt-1">
+            <div class="col-12 col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">기본 정보</h6>
+                        <dl class="row mb-0 small">
+                            <dt class="col-4 text-muted">사번</dt><dd class="col-8">@(user.EmployeeNumber ?? "-")</dd>
+                            <dt class="col-4 text-muted">이름</dt><dd class="col-8">@user.KoreanName (@user.EnglishName)</dd>
+                            <dt class="col-4 text-muted">생년월일</dt><dd class="col-8">@(user.BirthDate?.ToString("yyyy-MM-dd") ?? "-")</dd>
+                            <dt class="col-4 text-muted">성별</dt><dd class="col-8">@(user.Gender ?? "-")</dd>
+                            <dt class="col-4 text-muted">이메일</dt><dd class="col-8">@user.Email</dd>
+                            <dt class="col-4 text-muted">휴대전화</dt><dd class="col-8">@(user.PhoneNumber ?? "-")</dd>
+                            <dt class="col-4 text-muted">주소</dt><dd class="col-8">@(user.Address) @(user.AddressDetail)</dd>
+                            <dt class="col-4 text-muted">비상연락처</dt><dd class="col-8">@(user.EmergencyContact ?? "-") @(string.IsNullOrEmpty(user.EmergencyContactRelation) ? "" : $"({user.EmergencyContactRelation})")</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">고용 정보</h6>
+                        <dl class="row mb-0 small">
+                            <dt class="col-4 text-muted">부서</dt><dd class="col-8">@(user.Department ?? "-")</dd>
+                            <dt class="col-4 text-muted">직급/직무</dt><dd class="col-8">@(user.Rank ?? "-") / @(user.Position ?? "-")</dd>
+                            <dt class="col-4 text-muted">고용형태</dt><dd class="col-8">@(user.EmploymentType ?? "-")</dd>
+                            <dt class="col-4 text-muted">근무지</dt><dd class="col-8">@(user.WorkLocation ?? "-")</dd>
+                            <dt class="col-4 text-muted">입사일</dt><dd class="col-8">@(user.HireDate?.ToString("yyyy-MM-dd") ?? "-")</dd>
+                            <dt class="col-4 text-muted">재직여부</dt>
+                            <dd class="col-8">
+                                @if (user.IsActive)
+                                {
+                                    <span class="badge bg-success">재직</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">퇴사 (@user.ResignationDate?.ToString("yyyy-MM-dd"))</span>
+                                }
+                            </dd>
+                            <dt class="col-4 text-muted">최종학력</dt><dd class="col-8">@(user.LastEducation ?? "-") @(user.LastSchool) @(user.Major)</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ----- 서버 영속 카운터 (테스트) ----- *@
+        <div class="row g-3 mt-1">
+            <div class="col-12 col-lg-6">
+                <div class="card shadow-sm border-0">
+                    <div class="card-body">
+                        <h6 class="card-title">🧪 카운터 테스트 <small class="text-muted">(서버 저장 / 새로고침 후 유지)</small></h6>
+                        <div class="d-flex align-items-center gap-3">
+                            <div class="display-4 fw-bold text-primary">@counterValue</div>
+                            <button class="btn btn-lg btn-primary" @onclick="IncrementCounter">+1 (저장)</button>
+                            <button class="btn btn-outline-secondary" @onclick="ResetCounter">초기화</button>
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            마지막 저장: @(counterUpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")
+                        </small>
+                        <small class="text-muted">버튼을 누르면 DB에 저장됩니다. 페이지를 새로고침해도 값이 유지되는지 확인해보세요.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ApplicationUser? user;
+    private int counterValue;
+    private DateTime? counterUpdatedAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+        if (principal.Identity?.IsAuthenticated == true)
+        {
+            user = await UserManager.GetUserAsync(principal);
+            if (user != null)
+            {
+                await LoadCounter();
+            }
+        }
+    }
+
+    private async Task LoadCounter()
+    {
+        var c = await Db.UserCounters.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        counterValue = c?.Count ?? 0;
+        counterUpdatedAt = c?.UpdatedAt;
+    }
+
+    private async Task IncrementCounter()
+    {
+        var c = await Db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        if (c == null)
+        {
+            c = new UserCounter { UserId = user!.Id, Count = 0 };
+            Db.UserCounters.Add(c);
+        }
+        c.Count++;
+        c.UpdatedAt = DateTime.UtcNow;
+        await Db.SaveChangesAsync();
+        counterValue = c.Count;
+        counterUpdatedAt = c.UpdatedAt;
+    }
+
+    private async Task ResetCounter()
+    {
+        var c = await Db.UserCounters.FirstOrDefaultAsync(x => x.UserId == user!.Id);
+        if (c != null)
+        {
+            c.Count = 0;
+            c.UpdatedAt = DateTime.UtcNow;
+            await Db.SaveChangesAsync();
+        }
+        counterValue = 0;
+        counterUpdatedAt = c?.UpdatedAt;
+    }
+}
