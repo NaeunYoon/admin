@@ -29,7 +29,7 @@
                         <NavLink class="nav-link" href="profile">내 정보</NavLink>
                     </div>
                     <div class="nav-item px-3 ps-4">
-                        <NavLink class="nav-link" href="requests">연차 / 포상 상신</NavLink>
+                        <NavLink class="nav-link" href="requests">연차 / 추가근무 상신</NavLink>
                     </div>
                 </details>
 
@@ -89,16 +89,20 @@
         list-style: none;
         cursor: pointer;
         color: rgba(255,255,255,0.85);
-        padding-top: 0.6rem;
-        padding-bottom: 0.6rem;
-        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        min-height: 3rem;
+        font-size: 0.9rem;
         user-select: none;
     }
     .nav-group-title::-webkit-details-marker { display: none; }
     .nav-group-title::before {
         content: "▸";
         display: inline-block;
-        margin-right: 6px;
+        order: 2;
+        margin-left: auto;
+        font-size: 0.8rem;
+        opacity: 0.7;
         transition: transform 0.15s;
     }
     .nav-group[open] > .nav-group-title::before { transform: rotate(90deg); }

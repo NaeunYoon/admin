@@ -5,10 +5,10 @@
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 
-<PageTitle>연차/포상 상신</PageTitle>
+<PageTitle>연차/추가근무 상신</PageTitle>
 
 <div class="container-fluid py-3">
-    <h2 class="mb-4">연차 / 포상 상신</h2>
+    <h2 class="mb-4">연차 / 추가근무 상신</h2>
 
     <div class="row g-3">
         @* ---------- 휴가 상신 ---------- *@
@@ -69,11 +69,11 @@
             </div>
         </div>
 
-        @* ---------- 포상 상신 ---------- *@
+        @* ---------- 추가근무 상신 ---------- *@
         <div class="col-12 col-lg-6">
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-body">
-                    <h5 class="card-title">포상 상신</h5>
+                    <h5 class="card-title">추가근무 상신</h5>
                     <p class="text-muted small mb-3">추가근무 시간을 입력하면 1.2배로 포상이 계산됩니다. 직접 수정도 가능합니다.</p>
 
                     <div class="row g-2 mb-3">
@@ -101,7 +101,7 @@
                         <div class="alert alert-info py-2">@rewardMsg</div>
                     }
 
-                    <button class="btn btn-success" @onclick="SubmitReward">포상 상신</button>
+                    <button class="btn btn-success" @onclick="SubmitReward">추가근무 상신</button>
                 </div>
             </div>
         </div>
@@ -140,7 +140,7 @@
         </table>
     </div>
 
-    <h6 class="text-muted">포상</h6>
+    <h6 class="text-muted">추가근무</h6>
     <div class="table-responsive">
         <table class="table table-sm table-hover align-middle">
             <thead class="table-light">
@@ -276,7 +276,7 @@
             await db.SaveChangesAsync();
         }
 
-        rewardMsg = "포상 상신이 접수되었습니다. (승인 대기)";
+        rewardMsg = "추가근무 상신이 접수되었습니다. (승인 대기)";
         workHours = 0;
         rewardAmount = 0;
         rewardReason = "";
