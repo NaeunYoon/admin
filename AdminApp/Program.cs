@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using AdminApp.Components;
 using AdminApp.Components.Account;
 using AdminApp.Data;
+using ClosedXML.Excel;
 
 namespace AdminApp;
 
@@ -108,6 +109,57 @@ public class Program
             if (att == null) return Results.NotFound();
             return Results.File(att.Content, att.ContentType ?? "application/octet-stream", att.FileName);
         }).RequireAuthorization();
+
+        // 월별 근태 엑셀 리포트 (관리자 전용)
+        app.MapGet("/admin/attendance/export", async (int year, int month, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        {
+            if (month < 1 || month > 12) return Results.BadRequest("invalid month");
+            var first = new DateOnly(year, month, 1);
+            var last = first.AddMonths(1).AddDays(-1);
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var recs = await db.AttendanceRecords.AsNoTracking()
+                .Where(r => r.WorkDate >= first && r.WorkDate <= last)
+                .OrderBy(r => r.WorkDate).ThenBy(r => r.EmployeeNumber)
+                .ToListAsync();
+            var users = await db.Users.AsNoTracking().ToListAsync();
+            var udict = users.ToDictionary(u => u.Id, u => u);
+
+            using var wb = new XLWorkbook();
+            var ws = wb.AddWorksheet($"{year}-{month:00}");
+            string[] headers = { "날짜", "사번", "이름", "출근", "퇴근", "근무시간(분)", "지각" };
+            for (int i = 0; i < headers.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = headers[i];
+                ws.Cell(1, i + 1).Style.Font.Bold = true;
+            }
+
+            int row = 2;
+            foreach (var r in recs)
+            {
+                ApplicationUser? u = r.UserId != null && udict.TryGetValue(r.UserId, out var uu) ? uu : null;
+                var start = u?.ScheduledStartTime ?? new TimeOnly(9, 0);
+                bool late = r.CheckIn.HasValue && r.CheckIn.Value > start;
+                int? mins = (r.CheckIn.HasValue && r.CheckOut.HasValue && r.CheckOut.Value > r.CheckIn.Value)
+                    ? (int)(r.CheckOut.Value - r.CheckIn.Value).TotalMinutes : null;
+
+                ws.Cell(row, 1).Value = r.WorkDate.ToString("yyyy-MM-dd");
+                ws.Cell(row, 2).Value = r.EmployeeNumber;
+                ws.Cell(row, 3).Value = u?.KoreanName ?? "(미매칭)";
+                ws.Cell(row, 4).Value = r.CheckIn?.ToString("HH:mm") ?? "";
+                ws.Cell(row, 5).Value = r.CheckOut?.ToString("HH:mm") ?? "";
+                if (mins.HasValue) ws.Cell(row, 6).Value = mins.Value; else ws.Cell(row, 6).Value = "";
+                ws.Cell(row, 7).Value = late ? "지각" : (r.CheckIn.HasValue ? "정상" : "");
+                row++;
+            }
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            return Results.File(ms.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"근태_{year}-{month:00}.xlsx");
+        }).RequireAuthorization("AdminOnly");
 
         app.Run();
     }

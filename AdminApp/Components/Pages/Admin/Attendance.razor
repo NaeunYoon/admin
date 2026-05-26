@@ -1,0 +1,331 @@
+@page "/admin/attendance"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>근태 관리</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0">근태 관리</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="PrevMonth">◀</button>
+            <strong>@month.ToString("yyyy년 M월")</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NextMonth">▶</button>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <select class="form-select form-select-sm" style="max-width: 220px;" @bind="filterUserId">
+            <option value="">전체 직원</option>
+            @foreach (var u in users)
+            {
+                <option value="@u.Id">@u.KoreanName (@(u.EmployeeNumber ?? "-"))</option>
+            }
+        </select>
+        <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 수동 입력</button>
+        <a class="btn btn-success btn-sm" href="@($"/admin/attendance/export?year={month.Year}&month={month.Month}")" target="_blank">엑셀 내보내기</a>
+        <label class="btn btn-outline-primary btn-sm mb-0">
+            CSV 업로드
+            <InputFile OnChange="OnCsvSelected" accept=".csv,.txt" hidden />
+        </label>
+    </div>
+
+    @if (!string.IsNullOrEmpty(importMsg))
+    {
+        <div class="alert alert-info py-2">@importMsg</div>
+    }
+
+    <div class="text-muted small mb-2">
+        CSV 형식: <code>사번,날짜(YYYY-MM-DD),출근(HH:mm),퇴근(HH:mm)</code> — 첫 줄 헤더는 자동 무시. 같은 직원·날짜는 덮어씁니다.
+    </div>
+
+    @if (records == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr><th>날짜</th><th>사번</th><th>이름</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>지각</th><th>출처</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @if (Filtered.Count == 0)
+                    {
+                        <tr><td colspan="9" class="text-center text-muted">근태 기록이 없습니다.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var r in Filtered)
+                        {
+                            <tr>
+                                <td>@r.WorkDate.ToString("MM-dd (ddd)")</td>
+                                <td><small>@r.EmployeeNumber</small></td>
+                                <td>@NameOf(r.UserId)</td>
+                                <td>@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
+                                <td>@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
+                                <td>@r.WorkDisplay</td>
+                                <td>
+                                    @if (IsLate(r))
+                                    {
+                                        <span class="badge bg-danger">지각</span>
+                                    }
+                                    else if (r.CheckIn.HasValue)
+                                    {
+                                        <span class="badge bg-success">정상</span>
+                                    }
+                                </td>
+                                <td><small class="text-muted">@r.Source</small></td>
+                                <td class="text-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEdit(r)">편집</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRecord(r)">삭제</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+        <small class="text-muted">표시 @Filtered.Count 건</small>
+    }
+</div>
+
+@* ---------- 수동 입력/편집 모달 ---------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "근태 수동 입력" : "근태 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="() => editing = null"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">직원</label>
+                        <select class="form-select" @bind="editUserId" disabled="@(editing.Id != 0)">
+                            <option value="">선택</option>
+                            @foreach (var u in users)
+                            {
+                                <option value="@u.Id">@u.KoreanName (@(u.EmployeeNumber ?? "-"))</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">날짜</label>
+                            <input type="date" class="form-control" @bind="editing.WorkDate" disabled="@(editing.Id != 0)" />
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label">출근</label>
+                            <input type="time" class="form-control" @bind="editCheckIn" />
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label">퇴근</label>
+                            <input type="time" class="form-control" @bind="editCheckOut" />
+                        </div>
+                    </div>
+                    <div class="mb-0 mt-3">
+                        <label class="form-label">메모</label>
+                        <input class="form-control" @bind="editing.Note" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(editMsg))
+                    {
+                        <div class="alert alert-warning py-2 mt-3 mb-0">@editMsg</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => editing = null">취소</button>
+                    <button class="btn btn-primary" @onclick="SaveRecord">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private List<ApplicationUser> users = new();
+    private List<AttendanceRecord>? records;
+    private string filterUserId = "";
+
+    private AttendanceRecord? editing;
+    private string editUserId = "";
+    private TimeOnly? editCheckIn;
+    private TimeOnly? editCheckOut;
+    private string? editMsg;
+    private string? importMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        users = await db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
+        await LoadMonth();
+    }
+
+    private async Task LoadMonth()
+    {
+        var first = month;
+        var last = month.AddMonths(1).AddDays(-1);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        records = await db.AttendanceRecords.AsNoTracking()
+            .Where(r => r.WorkDate >= first && r.WorkDate <= last)
+            .OrderBy(r => r.WorkDate).ThenBy(r => r.EmployeeNumber)
+            .ToListAsync();
+    }
+
+    private List<AttendanceRecord> Filtered =>
+        (records ?? new()).Where(r => string.IsNullOrEmpty(filterUserId) || r.UserId == filterUserId).ToList();
+
+    private string NameOf(string? userId) =>
+        users.FirstOrDefault(u => u.Id == userId)?.KoreanName ?? "(미매칭)";
+
+    private bool IsLate(AttendanceRecord r)
+    {
+        if (!r.CheckIn.HasValue) return false;
+        var u = users.FirstOrDefault(x => x.Id == r.UserId);
+        var start = u?.ScheduledStartTime ?? new TimeOnly(9, 0);
+        return r.CheckIn.Value > start;
+    }
+
+    private async Task PrevMonth() { month = month.AddMonths(-1); await LoadMonth(); }
+    private async Task NextMonth() { month = month.AddMonths(1); await LoadMonth(); }
+
+    private void OpenNew()
+    {
+        editing = new AttendanceRecord { WorkDate = DateOnly.FromDateTime(DateTime.Today), Source = "수동" };
+        editUserId = "";
+        editCheckIn = null;
+        editCheckOut = null;
+        editMsg = null;
+    }
+
+    private void OpenEdit(AttendanceRecord r)
+    {
+        editing = new AttendanceRecord
+        {
+            Id = r.Id,
+            UserId = r.UserId,
+            EmployeeNumber = r.EmployeeNumber,
+            WorkDate = r.WorkDate,
+            CheckIn = r.CheckIn,
+            CheckOut = r.CheckOut,
+            Source = r.Source,
+            Note = r.Note
+        };
+        editUserId = r.UserId ?? "";
+        editCheckIn = r.CheckIn;
+        editCheckOut = r.CheckOut;
+        editMsg = null;
+    }
+
+    private async Task SaveRecord()
+    {
+        if (editing == null) return;
+        if (string.IsNullOrEmpty(editUserId)) { editMsg = "직원을 선택해주세요."; return; }
+
+        var u = users.FirstOrDefault(x => x.Id == editUserId);
+        editing.UserId = editUserId;
+        editing.EmployeeNumber = u?.EmployeeNumber ?? editing.EmployeeNumber;
+        editing.CheckIn = editCheckIn;
+        editing.CheckOut = editCheckOut;
+        editing.UpdatedAt = DateTime.UtcNow;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (editing.Id == 0)
+        {
+            // 같은 직원·날짜 중복 방지
+            var dup = await db.AttendanceRecords.AnyAsync(r => r.UserId == editing.UserId && r.WorkDate == editing.WorkDate);
+            if (dup) { editMsg = "해당 직원의 그 날짜 기록이 이미 있습니다. 목록에서 편집하세요."; return; }
+            editing.CreatedAt = DateTime.UtcNow;
+            db.AttendanceRecords.Add(editing);
+        }
+        else
+        {
+            var target = await db.AttendanceRecords.FindAsync(editing.Id);
+            if (target != null)
+            {
+                target.CheckIn = editing.CheckIn;
+                target.CheckOut = editing.CheckOut;
+                target.Note = editing.Note;
+                target.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+        await db.SaveChangesAsync();
+        editing = null;
+        await LoadMonth();
+    }
+
+    private async Task DeleteRecord(AttendanceRecord r)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var target = await db.AttendanceRecords.FindAsync(r.Id);
+        if (target != null)
+        {
+            db.AttendanceRecords.Remove(target);
+            await db.SaveChangesAsync();
+        }
+        await LoadMonth();
+    }
+
+    private async Task OnCsvSelected(InputFileChangeEventArgs e)
+    {
+        importMsg = null;
+        var file = e.File;
+        if (file == null) return;
+
+        using var reader = new StreamReader(file.OpenReadStream(5 * 1024 * 1024));
+        var content = await reader.ReadToEndAsync();
+        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        int added = 0, updated = 0, skipped = 0;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim().TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var cols = line.Split(',');
+            if (cols.Length < 2) { skipped++; continue; }
+            var empNo = cols[0].Trim();
+            // 헤더 줄 무시
+            if (empNo == "사번" || !DateOnly.TryParse(cols.ElementAtOrDefault(1)?.Trim(), out var date)) { skipped++; continue; }
+
+            var u = users.FirstOrDefault(x => x.EmployeeNumber == empNo);
+            TimeOnly? ci = TimeOnly.TryParse(cols.ElementAtOrDefault(2)?.Trim(), out var c1) ? c1 : null;
+            TimeOnly? co = TimeOnly.TryParse(cols.ElementAtOrDefault(3)?.Trim(), out var c2) ? c2 : null;
+
+            var existing = await db.AttendanceRecords
+                .FirstOrDefaultAsync(r => r.UserId == (u != null ? u.Id : null) && r.WorkDate == date && r.EmployeeNumber == empNo);
+            if (existing != null)
+            {
+                existing.CheckIn = ci;
+                existing.CheckOut = co;
+                existing.Source = "CSV";
+                existing.UpdatedAt = DateTime.UtcNow;
+                updated++;
+            }
+            else
+            {
+                db.AttendanceRecords.Add(new AttendanceRecord
+                {
+                    UserId = u?.Id,
+                    EmployeeNumber = empNo,
+                    WorkDate = date,
+                    CheckIn = ci,
+                    CheckOut = co,
+                    Source = "CSV",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+                added++;
+            }
+        }
+        await db.SaveChangesAsync();
+        importMsg = $"업로드 완료 — 추가 {added}건, 갱신 {updated}건, 건너뜀 {skipped}건.";
+        await LoadMonth();
+    }
+}

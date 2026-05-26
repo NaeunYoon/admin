@@ -12,6 +12,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<RewardRecord> RewardRecords => Set<RewardRecord>();
     public DbSet<SupplyRequest> SupplyRequests => Set<SupplyRequest>();
     public DbSet<CompanyEvent> CompanyEvents => Set<CompanyEvent>();
+    public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -27,6 +28,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .WithMany()
             .HasForeignKey(a => a.NoticeId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // 근태: (직원, 일자) 중복 방지
+        builder.Entity<AttendanceRecord>()
+            .HasIndex(a => new { a.UserId, a.WorkDate })
+            .IsUnique();
 
         // 금액/일수 정밀도
         builder.Entity<LeaveRequest>().Property(x => x.Days).HasPrecision(6, 2);

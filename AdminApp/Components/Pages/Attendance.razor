@@ -1,0 +1,133 @@
+@page "/attendance"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>내 근태</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0">내 근태</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="PrevMonth">◀</button>
+            <strong>@month.ToString("yyyy년 M월")</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NextMonth">▶</button>
+        </div>
+    </div>
+
+    @if (user == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm border-0"><div class="card-body py-3">
+                    <h6 class="text-muted mb-1">근무일</h6>
+                    <div class="fs-4 fw-bold text-primary">@records!.Count(r => r.CheckIn.HasValue) 일</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm border-0"><div class="card-body py-3">
+                    <h6 class="text-muted mb-1">지각</h6>
+                    <div class="fs-4 fw-bold text-danger">@records!.Count(IsLate) 회</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm border-0"><div class="card-body py-3">
+                    <h6 class="text-muted mb-1">총 근무시간</h6>
+                    <div class="fs-4 fw-bold">@TotalHours</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm border-0"><div class="card-body py-3">
+                    <h6 class="text-muted mb-1">출근 기준</h6>
+                    <div class="fs-4 fw-bold">@((user.ScheduledStartTime ?? new TimeOnly(9,0)).ToString("HH:mm"))</div>
+                </div></div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr><th>날짜</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th></tr>
+                </thead>
+                <tbody>
+                    @if (records!.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-center text-muted">근태 기록이 없습니다.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var r in records!)
+                        {
+                            <tr>
+                                <td>@r.WorkDate.ToString("MM-dd (ddd)")</td>
+                                <td>@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
+                                <td>@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
+                                <td>@r.WorkDisplay</td>
+                                <td>
+                                    @if (IsLate(r))
+                                    {
+                                        <span class="badge bg-danger">지각</span>
+                                    }
+                                    else if (r.CheckIn.HasValue)
+                                    {
+                                        <span class="badge bg-success">정상</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private ApplicationUser? user;
+    private List<AttendanceRecord>? records;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        user = await UserManager.GetUserAsync(authState.User);
+        await LoadMonth();
+    }
+
+    private async Task LoadMonth()
+    {
+        if (user == null) return;
+        var first = month;
+        var last = month.AddMonths(1).AddDays(-1);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        records = await db.AttendanceRecords.AsNoTracking()
+            .Where(r => r.UserId == user.Id && r.WorkDate >= first && r.WorkDate <= last)
+            .OrderBy(r => r.WorkDate)
+            .ToListAsync();
+    }
+
+    private bool IsLate(AttendanceRecord r)
+    {
+        if (!r.CheckIn.HasValue || user == null) return false;
+        var start = user.ScheduledStartTime ?? new TimeOnly(9, 0);
+        return r.CheckIn.Value > start;
+    }
+
+    private string TotalHours
+    {
+        get
+        {
+            var mins = (records ?? new()).Sum(r => r.WorkMinutes ?? 0);
+            return $"{mins / 60}h {mins % 60:00}m";
+        }
+    }
+
+    private async Task PrevMonth() { month = month.AddMonths(-1); await LoadMonth(); }
+    private async Task NextMonth() { month = month.AddMonths(1); await LoadMonth(); }
+}

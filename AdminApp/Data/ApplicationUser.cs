@@ -87,6 +87,9 @@ public class ApplicationUser : IdentityUser
     /// <summary>근무지 (본사/지사/재택 등)</summary>
     public string? WorkLocation { get; set; }
 
+    /// <summary>출근 예정 시각 (지각 판정 기준, 미설정 시 09:00)</summary>
+    public TimeOnly? ScheduledStartTime { get; set; }
+
     // ============================================================
     // 휴가
     // ============================================================
