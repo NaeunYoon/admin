@@ -184,10 +184,11 @@ public class ApplicationUser : IdentityUser
             : ResidentRegistrationNumber;
 
     /// <summary>
-    /// 근로기준법 제60조 기반 연차 계산
+    /// 근로기준법 제60조 기반 연차 계산 (1년차 발생분 합산 방식)
     /// - 1년 미만: 매월 1일씩 발생 (최대 11일)
-    /// - 1년 이상 ~ 3년 미만: 15일
-    /// - 3년 이상: 15일 + floor((년차-1)/2), 최대 25일
+    /// - 1년 이상: 1년차 발생분(11일) + 연차(15일, 3년 이상부터 매 2년 +1일·최대 25일)
+    ///   · 만 1~2년: 11 + 15 = 26일
+    ///   · 만 3년: 11 + 16 = 27일, 만 5년: 11 + 17 = 28일 ...
     /// </summary>
     public static decimal CalculateStatutoryAnnualLeave(DateOnly hireDate)
     {
@@ -203,10 +204,12 @@ public class ApplicationUser : IdentityUser
             return Math.Min(Math.Max(months, 0), 11);
         }
 
-        if (years < 3) return 15;
+        // 1년차에 발생한 연차(최대 11일)
+        const decimal firstYearLeave = 11m;
+        // 연차(15일 기준, 3년 이상부터 가산, 최대 25일)
+        var annual = Math.Min(15 + ((years - 1) / 2), 25);
 
-        var additional = (years - 1) / 2;
-        return Math.Min(15 + additional, 25);
+        return firstYearLeave + annual;
     }
 
     private static int CalculateAge(DateOnly birthDate)

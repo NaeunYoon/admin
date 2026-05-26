@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.EntityFrameworkCore
 @using AdminApp.Data
@@ -93,6 +94,10 @@
                             <td class="text-nowrap">
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => EditUser(u)">편집</button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenHistory(u)">내역</button>
+                                @if (CanDelete(u))
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => ConfirmDelete(u)">삭제</button>
+                                }
                             </td>
                         </tr>
                     }
@@ -357,6 +362,37 @@
     </div>
 }
 
+@* ---------------- 직원 삭제 확인 모달 ---------------- *@
+@if (deletingUser != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">직원 삭제</h5>
+                    <button type="button" class="btn-close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        <strong>@(deletingUser.KoreanName ?? deletingUser.UserName)</strong> 님을 삭제하시겠습니까?
+                    </p>
+                    <div class="alert alert-warning py-2 mb-0">
+                        ⚠️ 계정과 함께 해당 직원의 <strong>휴가/포상/비품 신청 내역</strong>이 모두 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+                    </div>
+                    @if (!string.IsNullOrEmpty(deleteError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@deleteError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelDelete">취소</button>
+                    <button class="btn btn-danger" @onclick="DeleteUser" disabled="@deleting">@(deleting ? "삭제 중..." : "삭제")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<ApplicationUser>? users;
     private Dictionary<string, List<string>> userRoles = new();
@@ -371,9 +407,75 @@
     private List<LeaveRequest>? historyLeaves;
     private List<RewardRecord>? historyRewards;
 
+    // 삭제
+    private ApplicationUser? deletingUser;
+    private string? deleteError;
+    private bool deleting;
+    private string? currentAdminId;
+    private const string SeedAdminEmail = "admin@admin.com";
+
     protected override async Task OnInitializedAsync()
     {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentAdminId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         await LoadUsers();
+    }
+
+    // 본인·시드관리자 계정은 삭제 불가
+    private bool CanDelete(ApplicationUser u) =>
+        u.Id != currentAdminId && !string.Equals(u.Email, SeedAdminEmail, StringComparison.OrdinalIgnoreCase);
+
+    private void ConfirmDelete(ApplicationUser u)
+    {
+        deletingUser = u;
+        deleteError = null;
+    }
+
+    private void CancelDelete()
+    {
+        deletingUser = null;
+        deleteError = null;
+    }
+
+    private async Task DeleteUser()
+    {
+        if (deletingUser == null || deleting) return;
+        if (!CanDelete(deletingUser)) { deleteError = "이 계정은 삭제할 수 없습니다."; return; }
+
+        deleting = true;
+        try
+        {
+            var target = await UserManager.FindByIdAsync(deletingUser.Id);
+            if (target == null) { deleteError = "사용자를 찾을 수 없습니다."; return; }
+
+            var uid = target.Id;
+            // 관련 신청 내역 정리 (외래키 없는 테이블 — 직접 삭제)
+            await using (var db = await DbFactory.CreateDbContextAsync())
+            {
+                await db.LeaveRequests.Where(x => x.UserId == uid).ExecuteDeleteAsync();
+                await db.RewardRecords.Where(x => x.UserId == uid).ExecuteDeleteAsync();
+                await db.SupplyRequests.Where(x => x.UserId == uid).ExecuteDeleteAsync();
+                await db.UserCounters.Where(x => x.UserId == uid).ExecuteDeleteAsync();
+            }
+
+            var result = await UserManager.DeleteAsync(target);
+            if (!result.Succeeded)
+            {
+                deleteError = "삭제 실패: " + string.Join(", ", result.Errors.Select(e => e.Description));
+                return;
+            }
+
+            deletingUser = null;
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            deleteError = "오류: " + ex.Message;
+        }
+        finally
+        {
+            deleting = false;
+        }
     }
 
     private async Task LoadUsers()

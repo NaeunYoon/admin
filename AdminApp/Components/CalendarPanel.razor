@@ -46,51 +46,75 @@
     </div>
 </div>
 
-@* ---------- 사내행사 등록 모달 (관리자) ---------- *@
-@if (eventEditing != null)
+@* ---------- 사내 일정 모달 (조회: 전원 / 등록·삭제: 관리자) ---------- *@
+@if (selectedDate != null)
 {
     <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">사내 행사 등록 — @eventEditing.Date.ToString("yyyy-MM-dd")</h5>
-                    <button type="button" class="btn-close" @onclick="() => eventEditing = null"></button>
+                    <h5 class="modal-title">사내 일정 — @selectedDate.Value.ToString("yyyy-MM-dd")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDay"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">분류</label>
-                        <select class="form-select" @bind="eventEditing.Category">
-                            <option value="회식">회식</option>
-                            <option value="기념일">기념일</option>
-                            <option value="행사">행사</option>
-                            <option value="기타">기타</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">제목</label>
-                        <input class="form-control" placeholder="예: 5월 전체 회식" @bind="eventEditing.Title" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">설명</label>
-                        <input class="form-control" @bind="eventEditing.Description" />
-                    </div>
-
-                    @if (dayEvents.Count > 0)
+                    @* ----- 이 날의 일정 (전원 조회) ----- *@
+                    @if (dayEvents.Count == 0)
                     {
-                        <hr />
-                        <h6 class="text-muted">이 날의 행사</h6>
+                        <p class="text-muted mb-0">등록된 일정이 없습니다.</p>
+                    }
+                    else
+                    {
                         @foreach (var e in dayEvents)
                         {
-                            <div class="d-flex justify-content-between align-items-center py-1">
-                                <span>🎉 @e.Title <small class="text-muted">(@e.Category)</small></span>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteEvent(e)">삭제</button>
+                            <div class="border rounded p-2 mb-2">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <span class="fw-bold">🎉 @e.Title</span>
+                                        <span class="badge bg-purple ms-1">@e.Category</span>
+                                    </div>
+                                    @if (isAdmin)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger py-0" @onclick="() => DeleteEvent(e)">삭제</button>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(e.Description))
+                                {
+                                    <div class="mt-1 small" style="white-space: pre-wrap;">@e.Description</div>
+                                }
                             </div>
                         }
                     }
+
+                    @* ----- 등록 폼 (관리자 전용) ----- *@
+                    @if (isAdmin && eventEditing != null)
+                    {
+                        <hr />
+                        <h6 class="text-muted">일정 추가</h6>
+                        <div class="mb-2">
+                            <label class="form-label">분류</label>
+                            <select class="form-select" @bind="eventEditing.Category">
+                                <option value="회식">회식</option>
+                                <option value="기념일">기념일</option>
+                                <option value="행사">행사</option>
+                                <option value="기타">기타</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">제목</label>
+                            <input class="form-control" placeholder="예: 5월 전체 회식" @bind="eventEditing.Title" />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">설명</label>
+                            <textarea class="form-control" rows="2" @bind="eventEditing.Description"></textarea>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" @onclick="() => eventEditing = null">닫기</button>
-                    <button class="btn btn-primary" @onclick="SaveEvent">행사 추가</button>
+                    <button class="btn btn-secondary" @onclick="CloseDay">닫기</button>
+                    @if (isAdmin)
+                    {
+                        <button class="btn btn-primary" @onclick="SaveEvent">행사 추가</button>
+                    }
                 </div>
             </div>
         </div>
@@ -122,6 +146,7 @@
     private bool isAdmin;
     private string? userId;
 
+    private DateOnly? selectedDate;
     private CompanyEvent? eventEditing;
     private List<CompanyEvent> dayEvents = new();
 
@@ -196,27 +221,35 @@
 
     private void OnDayClick(DateOnly date)
     {
-        if (!isAdmin) return;
-        eventEditing = new CompanyEvent { Date = date, Category = "회식" };
+        // 조회는 전원, 등록은 관리자만
+        selectedDate = date;
         dayEvents = events.Where(e => e.Date == date).ToList();
+        eventEditing = isAdmin ? new CompanyEvent { Date = date, Category = "회식" } : null;
+    }
+
+    private void CloseDay()
+    {
+        selectedDate = null;
+        eventEditing = null;
     }
 
     private async Task SaveEvent()
     {
-        if (eventEditing == null || string.IsNullOrWhiteSpace(eventEditing.Title)) return;
+        if (!isAdmin || eventEditing == null || string.IsNullOrWhiteSpace(eventEditing.Title)) return;
         eventEditing.CreatedById = userId;
         eventEditing.CreatedAt = DateTime.UtcNow;
 
+        var date = eventEditing.Date;
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
             db.CompanyEvents.Add(eventEditing);
             await db.SaveChangesAsync();
         }
 
-        var date = eventEditing.Date;
-        eventEditing = null;
         await LoadMonth();
         dayEvents = events.Where(e => e.Date == date).ToList();
+        // 추가 등록을 위해 폼 초기화
+        eventEditing = new CompanyEvent { Date = date, Category = "회식" };
     }
 
     private async Task DeleteEvent(CompanyEvent e)
