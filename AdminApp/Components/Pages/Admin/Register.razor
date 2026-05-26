@@ -21,7 +21,7 @@
             <h5 class="mb-3">✅ 직원 등록 완료</h5>
             <p class="mb-2">직원 <strong>@result.UserKoreanName</strong> 님에게 아래 정보를 전달해주세요.</p>
             <div class="bg-light p-3 rounded">
-                <div><strong>로그인 ID (이메일):</strong> <code class="user-select-all">@result.Email</code></div>
+                <div><strong>로그인 ID:</strong> <code class="user-select-all">@result.LoginId</code></div>
                 <div class="mt-1"><strong>임시 비밀번호:</strong> <code class="user-select-all">@result.TempPassword</code></div>
             </div>
             <small class="text-muted d-block mt-2">⚠️ 임시 비밀번호는 주민등록번호 앞 6자리입니다. 최초 로그인 후 본인이 비밀번호를 변경하도록 안내해주세요.</small>
@@ -55,8 +55,9 @@
                         <input class="form-control" @bind="form.KoreanName" />
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">이메일 (로그인 ID) <span class="text-danger">*</span></label>
-                        <input type="email" class="form-control" @bind="form.Email" />
+                        <label class="form-label">로그인 ID <span class="text-danger">*</span></label>
+                        <input class="form-control" placeholder="예: naeunyoon, hong123" @bind="form.LoginId" />
+                        <small class="text-muted">영문/숫자 권장. 로그인 시 사용합니다.</small>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">
@@ -136,6 +137,10 @@
                 <h6 class="text-muted">연락처 (선택)</h6>
                 <div class="row g-3">
                     <div class="col-md-4">
+                        <label class="form-label">이메일 <small class="text-muted">(사내 안내 발송용)</small></label>
+                        <input type="email" class="form-control" placeholder="name@example.com" @bind="form.Email" />
+                    </div>
+                    <div class="col-md-4">
                         <label class="form-label">영문 이름</label>
                         <input class="form-control" @bind="form.EnglishName" />
                     </div>
@@ -199,17 +204,24 @@
         {
             var errors = new List<string>();
             if (string.IsNullOrWhiteSpace(form.KoreanName)) errors.Add("한글 이름을 입력해주세요.");
-            if (string.IsNullOrWhiteSpace(form.Email)) errors.Add("이메일을 입력해주세요.");
+            if (string.IsNullOrWhiteSpace(form.LoginId)) errors.Add("로그인 ID를 입력해주세요.");
             if (string.IsNullOrWhiteSpace(form.ResidentRegistrationNumber)) errors.Add("주민등록번호를 입력해주세요.");
 
             var tempPassword = ResidentNumberHelper.ExtractTempPassword(form.ResidentRegistrationNumber);
             if (tempPassword.Length < 6) errors.Add("주민등록번호 앞 6자리(생년월일)가 필요합니다.");
 
-            // 이메일 중복 체크
+            // 로그인 ID 중복 체크
+            if (!string.IsNullOrWhiteSpace(form.LoginId))
+            {
+                var existsId = await UserManager.FindByNameAsync(form.LoginId.Trim());
+                if (existsId != null) errors.Add("이미 사용 중인 로그인 ID입니다.");
+            }
+
+            // 이메일 중복 체크 (입력한 경우에만)
             if (!string.IsNullOrWhiteSpace(form.Email))
             {
-                var exists = await UserManager.FindByEmailAsync(form.Email);
-                if (exists != null) errors.Add("이미 등록된 이메일입니다.");
+                var existsEmail = await UserManager.FindByEmailAsync(form.Email.Trim());
+                if (existsEmail != null) errors.Add("이미 등록된 이메일입니다.");
             }
 
             if (errors.Count > 0)
@@ -222,8 +234,8 @@
 
             var user = new ApplicationUser
             {
-                UserName = form.Email!,
-                Email = form.Email,
+                UserName = form.LoginId!.Trim(),
+                Email = string.IsNullOrWhiteSpace(form.Email) ? null : form.Email.Trim(),
                 EmailConfirmed = true,
                 EmployeeNumber = form.EmployeeNumber,
                 KoreanName = form.KoreanName,
@@ -262,7 +274,7 @@
             {
                 Success = true,
                 UserKoreanName = form.KoreanName!,
-                Email = form.Email!,
+                LoginId = form.LoginId!.Trim(),
                 TempPassword = tempPassword
             };
         }
@@ -287,6 +299,7 @@
     private class FormModel
     {
         public string? KoreanName { get; set; }
+        public string? LoginId { get; set; }
         public string? Email { get; set; }
         public string? ResidentRegistrationNumber { get; set; }
         public string? EmployeeNumber { get; set; }
@@ -304,7 +317,7 @@
     {
         public bool Success { get; set; }
         public string? UserKoreanName { get; set; }
-        public string? Email { get; set; }
+        public string? LoginId { get; set; }
         public string? TempPassword { get; set; }
         public List<string> Errors { get; set; } = new();
     }

@@ -1,52 +1,46 @@
 <#
 .SYNOPSIS
-    NAS(Synology Docker) 배포 스크립트.
-    로컬에서 GitHub에 push한 뒤, NAS에 SSH로 접속해 git pull + docker compose 재빌드를 실행합니다.
+    AdminApp -> Synology NAS 배포 스크립트 (tar + scp + docker compose).
+    NAS는 git 저장소가 아니므로, 로컬 소스를 압축해 전송 후 컨테이너를 재빌드합니다.
 
 .EXAMPLE
-    .\deploy.ps1 -NasUser naeunyoon -NasHost nas.intellicode.kr -NasRepoPath /volume1/docker/admin
+    .\deploy.ps1
 
 .NOTES
-    - SSH 인증이 동작해야 합니다(비밀번호 또는 SSH 키). 비밀번호 인증 시 실행 중 1회 입력합니다.
-    - DSM에서 SSH 서비스가 켜져 있어야 합니다(Control Panel → Terminal & SNMP → Enable SSH service).
-    - NAS에 docker compose v2가 있어야 합니다. 구버전이면 'docker-compose'로 바꾸세요.
+    - 무인 SSH 키(~/.ssh/nas_admin_deploy)로 접속합니다. 키가 없으면 -KeyPath로 지정하세요.
+    - DB(mariadb)는 docker named volume(mariadb_data)에 있어 app 재빌드 시 보존됩니다.
+    - scp는 Synology sshd 호환을 위해 -O(레거시 프로토콜)를 사용합니다.
 #>
 param(
     [string]$NasUser     = "naeunyoon",
     [string]$NasHost     = "nas.intellicode.kr",
     [int]   $NasPort     = 22,
-    [string]$NasRepoPath = "/volume1/docker/admin",   # NAS에 git clone된 경로로 수정
-    [string]$Branch      = "master",
-    [switch]$SkipPush                                  # 이미 push 했으면 -SkipPush
+    [string]$NasRepoPath = "/volume1/docker/admin",
+    [string]$KeyPath     = "$env:USERPROFILE\.ssh\nas_admin_deploy"
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-if (-not $SkipPush) {
-    Write-Host "==> 로컬 변경 push (origin/$Branch)" -ForegroundColor Cyan
-    git push origin $Branch
-}
+$tar = "AdminApp_update.tar.gz"
+Write-Host "==> 소스 압축 ($tar, bin/obj 제외)" -ForegroundColor Cyan
+if (Test-Path $tar) { Remove-Item $tar -Force }
+tar czf $tar --exclude='AdminApp/bin' --exclude='AdminApp/obj' --exclude='AdminApp/.vs' AdminApp
 
-# NAS에서 실행할 명령: 최신 코드 받고 컨테이너 재빌드 + 기동
+Write-Host "==> NAS로 전송" -ForegroundColor Cyan
+scp -O -i $KeyPath -o BatchMode=yes -o IdentitiesOnly=yes -P $NasPort $tar "${NasUser}@${NasHost}:$NasRepoPath/"
+if ($LASTEXITCODE -ne 0) { throw "scp 실패" }
+
+Write-Host "==> NAS에서 압축 해제 + 재빌드" -ForegroundColor Cyan
 $remote = @"
-set -e
-cd '$NasRepoPath'
-git fetch --all
-git reset --hard origin/$Branch
+export PATH=/usr/local/bin:/usr/bin:/bin:`$PATH
+cd '$NasRepoPath' || exit 1
+tar xzf $tar && echo extracted
 docker compose up -d --build
 docker compose ps
+rm -f $tar
 "@
+ssh -i $KeyPath -o BatchMode=yes -o IdentitiesOnly=yes -p $NasPort "${NasUser}@${NasHost}" $remote
 
-Write-Host "==> NAS($NasUser@$NasHost:$NasPort)에서 재배포 실행" -ForegroundColor Cyan
-
-# ssh가 PATH에 있으면 ssh, 없으면 plink 사용
-$ssh = Get-Command ssh -ErrorAction SilentlyContinue
-if ($ssh) {
-    $remote | & ssh -p $NasPort "$NasUser@$NasHost" "bash -s"
-} else {
-    $plink = "C:\Program Files\PuTTY\plink.exe"
-    $remote | & $plink -ssh -P $NasPort "$NasUser@$NasHost" "bash -s"
-}
-
-Write-Host "==> 완료. http://$NasHost`:3100 에서 확인하세요." -ForegroundColor Green
+Remove-Item $tar -Force -ErrorAction SilentlyContinue
+Write-Host "==> 완료. http://${NasHost}:3100 에서 확인하세요." -ForegroundColor Green
