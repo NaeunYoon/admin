@@ -1,0 +1,235 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.EditableTextService Texts
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="card shadow-sm border-0 h-100">
+    <div class="card-body d-flex flex-column">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0 fs-5">@Texts.Get("shared.devices.title")</h4>
+            @if (isAdmin)
+            {
+                <button class="btn btn-outline-primary btn-sm" @onclick="OpenNew">+ 추가</button>
+            }
+        </div>
+
+        @if (devices == null)
+        {
+            <p class="text-muted small">로딩 중...</p>
+        }
+        else if (devices.Count == 0)
+        {
+            <div class="text-center text-muted py-4 flex-grow-1">
+                <div class="fs-3">🖥️</div>
+                <p class="mb-0 small">등록된 기기가 없습니다.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive flex-grow-1">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>기기명</th>
+                            <th class="d-none d-md-table-cell">분류</th>
+                            <th class="d-none d-lg-table-cell">위치</th>
+                            <th>상태</th>
+                            @if (isAdmin)
+                            {
+                                <th></th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in devices)
+                        {
+                            <tr>
+                                <td>
+                                    <strong>@d.Name</strong>
+                                    @if (!string.IsNullOrEmpty(d.Specs))
+                                    {
+                                        <small class="text-muted d-block">@d.Specs</small>
+                                    }
+                                </td>
+                                <td class="d-none d-md-table-cell"><small>@(d.Category ?? "-")</small></td>
+                                <td class="d-none d-lg-table-cell"><small>@(d.Location ?? "-")</small></td>
+                                <td><span class="badge @StatusClass(d.Status)">@(d.Status ?? "-")</span></td>
+                                @if (isAdmin)
+                                {
+                                    <td class="text-nowrap">
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(d)">편집</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(d)">삭제</button>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@* ---------- 편집 모달 ---------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "기기 추가" : "기기 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">기기명 <span class="text-danger">*</span></label>
+                            <input class="form-control" placeholder="예: 회의실 빔, 디자인팀 노트북" @bind="editing.Name" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">분류</label>
+                            <select class="form-select" @bind="editing.Category">
+                                <option value="">선택</option>
+                                <option value="노트북">노트북</option>
+                                <option value="데스크탑">데스크탑</option>
+                                <option value="모니터">모니터</option>
+                                <option value="프린터">프린터</option>
+                                <option value="빔/프로젝터">빔/프로젝터</option>
+                                <option value="카메라">카메라</option>
+                                <option value="태블릿">태블릿</option>
+                                <option value="기타">기타</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">사양</label>
+                            <input class="form-control" placeholder="예: i7-12700, 16GB RAM, 512GB SSD" @bind="editing.Specs" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">보관 위치</label>
+                            <input class="form-control" placeholder="예: 회의실 A, 1층 보관함" @bind="editing.Location" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">시리얼/관리번호</label>
+                            <input class="form-control" @bind="editing.SerialNumber" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">상태</label>
+                            <select class="form-select" @bind="editing.Status">
+                                <option value="유휴">유휴</option>
+                                <option value="사용중">사용중</option>
+                                <option value="수리">수리</option>
+                                <option value="폐기">폐기</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">메모</label>
+                            <textarea class="form-control" rows="2" @bind="editing.Notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SharedDevice>? devices;
+    private SharedDevice? editing;
+    private bool isAdmin;
+    private bool saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        isAdmin = authState.User.IsInRole("Admin");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        devices = await db.SharedDevices.AsNoTracking()
+            .OrderBy(d => d.Category).ThenBy(d => d.Name)
+            .ToListAsync();
+    }
+
+    private void OpenNew()
+    {
+        if (!isAdmin) return;
+        editing = new SharedDevice { Status = "유휴" };
+    }
+
+    private void OpenEdit(SharedDevice d)
+    {
+        if (!isAdmin) return;
+        editing = new SharedDevice
+        {
+            Id = d.Id,
+            Name = d.Name,
+            Category = d.Category,
+            Specs = d.Specs,
+            Location = d.Location,
+            SerialNumber = d.SerialNumber,
+            Status = d.Status,
+            Notes = d.Notes,
+            CreatedAt = d.CreatedAt
+        };
+    }
+
+    private void Cancel() => editing = null;
+
+    private async Task Save()
+    {
+        if (editing == null || string.IsNullOrWhiteSpace(editing.Name)) return;
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (editing.Id == 0)
+            {
+                editing.CreatedAt = DateTime.UtcNow;
+                editing.UpdatedAt = DateTime.UtcNow;
+                db.SharedDevices.Add(editing);
+            }
+            else
+            {
+                var target = await db.SharedDevices.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                target.Name = editing.Name;
+                target.Category = editing.Category;
+                target.Specs = editing.Specs;
+                target.Location = editing.Location;
+                target.SerialNumber = editing.SerialNumber;
+                target.Status = editing.Status;
+                target.Notes = editing.Notes;
+                target.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+        finally { saving = false; }
+        editing = null;
+        await Load();
+    }
+
+    private async Task Delete(SharedDevice d)
+    {
+        if (!isAdmin) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.SharedDevices.Where(x => x.Id == d.Id).ExecuteDeleteAsync();
+        await Load();
+    }
+
+    private static string StatusClass(string? status) => status switch
+    {
+        "사용중" => "bg-primary",
+        "유휴" => "bg-success",
+        "수리" => "bg-warning text-dark",
+        "폐기" => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+}

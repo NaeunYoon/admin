@@ -1,5 +1,5 @@
-﻿<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="ko">
 
 <head>
     <meta charset="utf-8" />
@@ -14,8 +14,58 @@
 
 <body>
     <Routes />
+
+    @* Blazor 기본 재연결 UI. 연결이 끊기면 blazor.web.js가 이 요소에
+       components-reconnect-show/failed/rejected 클래스를 붙여 표시한다.
+       자동 새로고침은 하지 않고, 사용자가 직접 새로고침할 수 있게 버튼을 둔다. *@
+    <div id="components-reconnect-modal" class="components-reconnect-hide">
+        <div class="reconnect-box">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <div class="fw-semibold">서버와 다시 연결 중입니다...</div>
+            <small class="text-muted d-block mt-1">잠시만 기다려 주세요.</small>
+            <button onclick="location.reload()" class="btn btn-primary btn-sm mt-3">지금 새로고침</button>
+        </div>
+    </div>
+    <style>
+        #components-reconnect-modal { display: none; }
+        #components-reconnect-modal.components-reconnect-show,
+        #components-reconnect-modal.components-reconnect-failed,
+        #components-reconnect-modal.components-reconnect-rejected {
+            display: flex;
+            position: fixed; inset: 0; z-index: 2000;
+            background: rgba(0,0,0,0.45);
+            align-items: center; justify-content: center;
+        }
+        #components-reconnect-modal .reconnect-box {
+            background: #fff; padding: 2rem 2.5rem; border-radius: 12px;
+            text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            font-size: 0.95rem; color: #333;
+        }
+    </style>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="_framework/blazor.web.js"></script>
+    <script>
+        // 회로 keep-alive: 상호작용 페이지에서 12초마다 서버에 가벼운 핑을 보내 연결을 살려둔다.
+        // ★ 실패해도 아무 동작도 하지 않는다(자동 새로고침 없음 → 무한루프 불가능).
+        //    끊김 복구는 위의 Blazor 기본 재연결 UI가 담당.
+        (function () {
+            function withTimeout(p, ms) {
+                return new Promise(function (resolve, reject) {
+                    var t = setTimeout(function () { reject(new Error('timeout')); }, ms);
+                    p.then(function (v) { clearTimeout(t); resolve(v); },
+                           function (e) { clearTimeout(t); reject(e); });
+                });
+            }
+            setInterval(function () {
+                if (typeof DotNet === 'undefined' || !DotNet.invokeMethodAsync) return;
+                try {
+                    withTimeout(DotNet.invokeMethodAsync('AdminApp', 'Ping'), 8000)
+                        .catch(function () { /* 끊김 → 무시(새로고침 안 함) */ });
+                } catch (e) { /* 무시 */ }
+            }, 12000);
+        })();
+    </script>
 </body>
 
 </html>

@@ -7,11 +7,11 @@
 @using AdminApp.Data
 @using AdminApp.Helpers
 
-<PageTitle>직원 등록</PageTitle>
+<PageTitle>직원 / 게스트 등록</PageTitle>
 
 <div class="container py-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-        <h2 class="mb-0">직원 등록</h2>
+        <h2 class="mb-0">직원 / 게스트 등록</h2>
         <a class="btn btn-outline-secondary" href="admin/users">목록으로</a>
     </div>
 
@@ -48,26 +48,57 @@
 
         <div class="card shadow-sm">
             <div class="card-body">
+                @* ----- 역할 선택 ----- *@
+                <div class="mb-3">
+                    <label class="form-label fw-bold">역할 <span class="text-danger">*</span></label>
+                    <div>
+                        <input type="radio" class="btn-check" name="role" id="role-emp"
+                               checked="@(form.Role == "Employee")" @onchange='() => form.Role = "Employee"' autocomplete="off" />
+                        <label class="btn btn-outline-primary me-2" for="role-emp">👤 직원 (Employee)</label>
+                        <input type="radio" class="btn-check" name="role" id="role-guest"
+                               checked="@(form.Role == "Guest")" @onchange='() => form.Role = "Guest"' autocomplete="off" />
+                        <label class="btn btn-outline-success" for="role-guest">🏢 게스트 (협력사·외부)</label>
+                    </div>
+                    @if (form.Role == "Guest")
+                    {
+                        <small class="text-muted d-block mt-1">
+                            게스트는 홈/공지/캘린더/회의실 예약/비품 요청/인사이트만 볼 수 있습니다. 개인정보·관리자 메뉴 차단.
+                        </small>
+                    }
+                </div>
+
                 <h6 class="text-muted">필수 정보</h6>
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <label class="form-label">한글 이름 <span class="text-danger">*</span></label>
+                        <label class="form-label">한글 이름 (또는 회사명) <span class="text-danger">*</span></label>
                         <input class="form-control" @bind="form.KoreanName" />
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">로그인 ID <span class="text-danger">*</span></label>
-                        <input class="form-control" placeholder="예: naeunyoon, hong123" @bind="form.LoginId" />
+                        <input class="form-control" placeholder="예: naeunyoon, partnerco" @bind="form.LoginId" />
                         <small class="text-muted">영문/숫자 권장. 로그인 시 사용합니다.</small>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">
-                            주민등록번호 <span class="text-danger">*</span>
-                            <small class="text-muted">(앞 6자리 = 임시 비밀번호)</small>
-                        </label>
-                        <input class="form-control" placeholder="940220-2123456"
-                               @bind="form.ResidentRegistrationNumber"
-                               @bind:event="oninput"
-                               @bind:after="OnRrnChanged" />
+                        @if (form.Role == "Employee")
+                        {
+                            <label class="form-label">
+                                주민등록번호 <span class="text-danger">*</span>
+                                <small class="text-muted">(앞 6자리 = 임시 비밀번호)</small>
+                            </label>
+                            <input class="form-control" placeholder="940220-2123456"
+                                   @bind="form.ResidentRegistrationNumber"
+                                   @bind:event="oninput"
+                                   @bind:after="OnRrnChanged" />
+                        }
+                        else
+                        {
+                            <label class="form-label">
+                                임시 비밀번호 <span class="text-danger">*</span>
+                                <small class="text-muted">(6자 이상, 게스트 본인이 변경 가능)</small>
+                            </label>
+                            <input class="form-control" placeholder="예: guest12, 협력사 코드"
+                                   @bind="form.GuestPassword" />
+                        }
                     </div>
 
                     @if (parsedBirth != null || parsedGender != null)
@@ -203,12 +234,22 @@
         try
         {
             var errors = new List<string>();
-            if (string.IsNullOrWhiteSpace(form.KoreanName)) errors.Add("한글 이름을 입력해주세요.");
+            if (string.IsNullOrWhiteSpace(form.KoreanName)) errors.Add("이름(또는 회사명)을 입력해주세요.");
             if (string.IsNullOrWhiteSpace(form.LoginId)) errors.Add("로그인 ID를 입력해주세요.");
-            if (string.IsNullOrWhiteSpace(form.ResidentRegistrationNumber)) errors.Add("주민등록번호를 입력해주세요.");
 
-            var tempPassword = ResidentNumberHelper.ExtractTempPassword(form.ResidentRegistrationNumber);
-            if (tempPassword.Length < 6) errors.Add("주민등록번호 앞 6자리(생년월일)가 필요합니다.");
+            string tempPassword;
+            if (form.Role == "Guest")
+            {
+                tempPassword = form.GuestPassword?.Trim() ?? "";
+                if (tempPassword.Length < 6) errors.Add("임시 비밀번호는 6자 이상이어야 합니다.");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(form.ResidentRegistrationNumber))
+                    errors.Add("주민등록번호를 입력해주세요.");
+                tempPassword = ResidentNumberHelper.ExtractTempPassword(form.ResidentRegistrationNumber);
+                if (tempPassword.Length < 6) errors.Add("주민등록번호 앞 6자리(생년월일)가 필요합니다.");
+            }
 
             // 로그인 ID 중복 체크
             if (!string.IsNullOrWhiteSpace(form.LoginId))
@@ -230,29 +271,35 @@
                 return;
             }
 
-            var (birth, gender) = ResidentNumberHelper.Parse(form.ResidentRegistrationNumber!);
+            // 직원만 주민번호 파싱
+            DateOnly? birth = null;
+            string? gender = null;
+            if (form.Role == "Employee" && !string.IsNullOrWhiteSpace(form.ResidentRegistrationNumber))
+            {
+                (birth, gender) = ResidentNumberHelper.Parse(form.ResidentRegistrationNumber);
+            }
 
             var user = new ApplicationUser
             {
                 UserName = form.LoginId!.Trim(),
                 Email = string.IsNullOrWhiteSpace(form.Email) ? null : form.Email.Trim(),
                 EmailConfirmed = true,
-                EmployeeNumber = form.EmployeeNumber,
+                EmployeeNumber = form.Role == "Employee" ? form.EmployeeNumber : null,
                 KoreanName = form.KoreanName,
                 EnglishName = form.EnglishName,
                 BirthDate = birth,
                 Gender = gender,
-                ResidentRegistrationNumber = form.ResidentRegistrationNumber,
+                ResidentRegistrationNumber = form.Role == "Employee" ? form.ResidentRegistrationNumber : null,
                 PhoneNumber = form.PhoneNumber,
-                HireDate = form.HireDate,
-                EmploymentType = form.EmploymentType,
+                HireDate = form.Role == "Employee" ? form.HireDate : null,
+                EmploymentType = form.Role == "Employee" ? form.EmploymentType : "게스트",
                 Department = form.Department,
-                Position = form.Position,
-                Rank = form.Rank,
+                Position = form.Role == "Guest" ? "게스트" : form.Position,
+                Rank = form.Role == "Employee" ? form.Rank : null,
                 WorkLocation = form.WorkLocation,
-                TotalAnnualLeave = form.HireDate.HasValue
+                TotalAnnualLeave = form.Role == "Employee" && form.HireDate.HasValue
                     ? ApplicationUser.CalculateStatutoryAnnualLeave(form.HireDate.Value)
-                    : 15m,
+                    : 0m,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -268,7 +315,8 @@
                 return;
             }
 
-            await UserManager.AddToRoleAsync(user, "Employee");
+            // 선택한 역할 부여 (Employee 또는 Guest)
+            await UserManager.AddToRoleAsync(user, form.Role);
 
             result = new RegisterResult
             {
@@ -290,7 +338,7 @@
 
     private void ResetForm()
     {
-        form = new FormModel { HireDate = DateOnly.FromDateTime(DateTime.Today), EmploymentType = "정규직" };
+        form = new FormModel { Role = "Employee", HireDate = DateOnly.FromDateTime(DateTime.Today), EmploymentType = "정규직" };
         result = null;
         parsedBirth = null;
         parsedGender = null;
@@ -298,6 +346,8 @@
 
     private class FormModel
     {
+        public string Role { get; set; } = "Employee";  // "Employee" 또는 "Guest"
+        public string? GuestPassword { get; set; }      // 게스트 전용 임시 비밀번호
         public string? KoreanName { get; set; }
         public string? LoginId { get; set; }
         public string? Email { get; set; }

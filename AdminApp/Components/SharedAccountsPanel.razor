@@ -1,0 +1,244 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject AdminApp.Services.EditableTextService Texts
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="card shadow-sm border-0 h-100">
+    <div class="card-body d-flex flex-column">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0 fs-5">@Texts.Get("shared.accounts.title")</h4>
+            @if (isAdmin)
+            {
+                <button class="btn btn-outline-primary btn-sm" @onclick="OpenNew">+ 추가</button>
+            }
+        </div>
+
+        @if (accounts == null)
+        {
+            <p class="text-muted small">로딩 중...</p>
+        }
+        else if (accounts.Count == 0)
+        {
+            <div class="text-center text-muted py-4 flex-grow-1">
+                <div class="fs-3">🔑</div>
+                <p class="mb-0 small">등록된 계정이 없습니다.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive flex-grow-1">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>프로그램</th>
+                            <th class="d-none d-md-table-cell">ID</th>
+                            <th>비밀번호</th>
+                            @if (isAdmin)
+                            {
+                                <th></th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in accounts)
+                        {
+                            <tr>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(a.Url))
+                                    {
+                                        <a href="@a.Url" target="_blank" rel="noopener" class="text-decoration-none">
+                                            <strong>@a.ProgramName</strong> <small>↗</small>
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <strong>@a.ProgramName</strong>
+                                    }
+                                    @if (!string.IsNullOrEmpty(a.Purpose))
+                                    {
+                                        <small class="text-muted d-block">@a.Purpose</small>
+                                    }
+                                </td>
+                                <td class="d-none d-md-table-cell">
+                                    <code class="small">@(a.LoginId ?? "-")</code>
+                                    @if (!string.IsNullOrEmpty(a.LoginId))
+                                    {
+                                        <button class="btn btn-sm btn-link p-0 ms-1" title="ID 복사"
+                                                @onclick="() => Copy(a.LoginId!)">📋</button>
+                                    }
+                                </td>
+                                <td>
+                                    @if (string.IsNullOrEmpty(a.Password))
+                                    {
+                                        <small class="text-muted">-</small>
+                                    }
+                                    else
+                                    {
+                                        <code class="small">@(revealed.Contains(a.Id) ? a.Password : "••••••••")</code>
+                                        <button class="btn btn-sm btn-link p-0 ms-1" title="@(revealed.Contains(a.Id) ? "숨기기" : "보이기")"
+                                                @onclick="() => ToggleReveal(a.Id)">@(revealed.Contains(a.Id) ? "🙈" : "👁")</button>
+                                        <button class="btn btn-sm btn-link p-0 ms-1" title="비밀번호 복사"
+                                                @onclick="() => Copy(a.Password!)">📋</button>
+                                    }
+                                </td>
+                                @if (isAdmin)
+                                {
+                                    <td class="text-nowrap">
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(a)">편집</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(a)">삭제</button>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@* ---------- 편집 모달 ---------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "계정 추가" : "계정 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">프로그램/서비스명 <span class="text-danger">*</span></label>
+                            <input class="form-control" placeholder="예: ChatGPT Plus, Adobe CC" @bind="editing.ProgramName" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">용도</label>
+                            <input class="form-control" placeholder="예: 개발팀 공용, 마케팅" @bind="editing.Purpose" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">로그인 ID</label>
+                            <input class="form-control" @bind="editing.LoginId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">비밀번호</label>
+                            <input class="form-control" @bind="editing.Password" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">접속 URL</label>
+                            <input class="form-control" placeholder="https://..." @bind="editing.Url" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">메모</label>
+                            <textarea class="form-control" rows="2" @bind="editing.Notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SharedAccount>? accounts;
+    private SharedAccount? editing;
+    private HashSet<int> revealed = new();
+    private bool isAdmin;
+    private bool saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        isAdmin = authState.User.IsInRole("Admin");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        accounts = await db.SharedAccounts.AsNoTracking()
+            .OrderBy(a => a.ProgramName)
+            .ToListAsync();
+    }
+
+    private void ToggleReveal(int id)
+    {
+        if (!revealed.Add(id)) revealed.Remove(id);
+    }
+
+    private async Task Copy(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); } catch { }
+    }
+
+    private void OpenNew()
+    {
+        if (!isAdmin) return;
+        editing = new SharedAccount();
+    }
+
+    private void OpenEdit(SharedAccount a)
+    {
+        if (!isAdmin) return;
+        editing = new SharedAccount
+        {
+            Id = a.Id,
+            ProgramName = a.ProgramName,
+            Purpose = a.Purpose,
+            LoginId = a.LoginId,
+            Password = a.Password,
+            Url = a.Url,
+            Notes = a.Notes,
+            CreatedAt = a.CreatedAt
+        };
+    }
+
+    private void Cancel() => editing = null;
+
+    private async Task Save()
+    {
+        if (editing == null || string.IsNullOrWhiteSpace(editing.ProgramName)) return;
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (editing.Id == 0)
+            {
+                editing.CreatedAt = DateTime.UtcNow;
+                editing.UpdatedAt = DateTime.UtcNow;
+                db.SharedAccounts.Add(editing);
+            }
+            else
+            {
+                var target = await db.SharedAccounts.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                target.ProgramName = editing.ProgramName;
+                target.Purpose = editing.Purpose;
+                target.LoginId = editing.LoginId;
+                target.Password = editing.Password;
+                target.Url = editing.Url;
+                target.Notes = editing.Notes;
+                target.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+        finally { saving = false; }
+        editing = null;
+        await Load();
+    }
+
+    private async Task Delete(SharedAccount a)
+    {
+        if (!isAdmin) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.SharedAccounts.Where(x => x.Id == a.Id).ExecuteDeleteAsync();
+        await Load();
+    }
+}

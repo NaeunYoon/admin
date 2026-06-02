@@ -175,7 +175,7 @@
                             <div id="sec4" class="accordion-collapse collapse">
                                 <div class="accordion-body">
                                     <div class="row g-3">
-                                        <div class="col-md-4"><label class="form-label">입사일</label><input type="date" class="form-control" @bind="editing.HireDate" /></div>
+                                        <div class="col-md-4"><label class="form-label">입사일 <small class="text-muted">(변경 시 법정 연차 자동 반영)</small></label><input type="date" class="form-control" @bind="editing.HireDate" @bind:after="OnHireDateChanged" /></div>
                                         <div class="col-md-4"><label class="form-label">퇴사일 <small class="text-muted">(재직중이면 비움)</small></label><input type="date" class="form-control" @bind="editing.ResignationDate" /></div>
                                         <div class="col-md-4">
                                             <label class="form-label">고용 형태</label>
@@ -483,7 +483,13 @@
     {
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            users = await db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
+            var list = await db.Users.AsNoTracking().ToListAsync();
+            // 사번 숫자 오름차순 (1,2,3,...10,11). 사번 없는 사람은 뒤로.
+            users = list
+                .OrderBy(u => EmpNoSortKey(u.EmployeeNumber))
+                .ThenBy(u => u.EmployeeNumber, StringComparer.Ordinal)
+                .ThenBy(u => u.KoreanName)
+                .ToList();
         }
         userRoles.Clear();
         foreach (var u in users)
@@ -491,6 +497,14 @@
             var roles = await UserManager.GetRolesAsync(u);
             userRoles[u.Id] = roles.ToList();
         }
+    }
+
+    // 사번 정렬 키: 숫자만 추출해 정수로. 사번 없으면 맨 뒤(long.MaxValue).
+    private static long EmpNoSortKey(string? empNo)
+    {
+        if (string.IsNullOrWhiteSpace(empNo)) return long.MaxValue;
+        var digits = new string(empNo.Where(char.IsDigit).ToArray());
+        return long.TryParse(digits, out var n) ? n : long.MaxValue - 1;
     }
 
     private IEnumerable<ApplicationUser> FilteredUsers =>
@@ -636,6 +650,15 @@
     private void ApplyStatutoryLeave()
     {
         if (editing != null)
+        {
+            editing.TotalAnnualLeave = editing.StatutoryAnnualLeave;
+        }
+    }
+
+    // 입사일을 바꾸면 법정 연차를 자동으로 다시 계산해 총 연차에 반영
+    private void OnHireDateChanged()
+    {
+        if (editing?.HireDate != null)
         {
             editing.TotalAnnualLeave = editing.StatutoryAnnualLeave;
         }

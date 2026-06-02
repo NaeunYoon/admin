@@ -1,0 +1,449 @@
+@page "/reservations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.EditableTextService Texts
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>회의실 예약</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0 fs-4">@Texts.Get("reservations.page.title")</h2>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="PrevWeek">◀ 이전 주</button>
+            <strong>@weekMonday.ToString("yyyy년 M월 d일") ~ @weekMonday.AddDays(4).ToString("M월 d일")</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NextWeek">다음 주 ▶</button>
+            <button class="btn btn-outline-primary btn-sm" @onclick="ResetWeek">이번 주</button>
+        </div>
+    </div>
+
+    <small class="text-muted d-block mb-2">빈 셀을 클릭하면 새 예약을 만들 수 있어요. 예약을 클릭하면 편집/삭제할 수 있어요.</small>
+
+    @if (reservations == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else
+    {
+        <div class="reservation-grid">
+            @* 헤더 행 — 모든 셀에 명시적 grid-row/column 부여로 auto-flow 흔들림 방지 *@
+            <div class="cell header-cell time-header" style="grid-row:1; grid-column:1;">시간</div>
+            @for (int d = 0; d < 5; d++)
+            {
+                var date = weekMonday.AddDays(d);
+                var isToday = date == DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9));
+                <div class="cell header-cell @(isToday ? "today-header" : "")" style="grid-row:1; grid-column:@(d+2);">
+                    <div>@WeekdayKo(date.DayOfWeek)</div>
+                    <small>@date.ToString("M/d")</small>
+                </div>
+            }
+
+            @* 시간 행 (08~19시 = 11블록) — 모든 셀 명시적 위치 *@
+            @for (int h = 8; h <= 18; h++)
+            {
+                var hour = h;
+                var row = hour - 8 + 2;
+                <div class="cell time-cell" style="grid-row:@row; grid-column:1;">@(hour.ToString("D2") + ":00")</div>
+                @for (int d = 0; d < 5; d++)
+                {
+                    var day = d;
+                    var date = weekMonday.AddDays(day);
+                    <div class="cell slot-cell" style="grid-row:@row; grid-column:@(d+2);"
+                         @onclick="() => OpenNew(date, new TimeOnly(hour, 0))"></div>
+                }
+            }
+
+            @* 정기 회의 블록 (먼저 — 일회성 예약이 위에 올라오게) *@
+            @foreach (var (m, date) in RecurringInWeek())
+            {
+                var dayIndex = ((int)date.DayOfWeek - 1 + 7) % 7;
+                if (dayIndex >= 5) continue;
+                var startRow = Math.Max(0, m.StartTime.Hour - 8) + 2;
+                var spanHours = Math.Max(1, m.EndTime.Hour - m.StartTime.Hour);
+                var col = dayIndex + 2;
+                <div class="reservation-block recurring-block"
+                     style="grid-column:@col; grid-row:@startRow / span @spanHours; background-color: @m.Color;"
+                     title="정기 회의 — 관리자 페이지에서 수정">
+                    <div class="r-title">🔁 @m.Title</div>
+                    <div class="r-time">@m.StartTime.ToString("HH:mm")–@m.EndTime.ToString("HH:mm")</div>
+                    <div class="r-by">정기</div>
+                </div>
+            }
+
+            @* 일회성 예약 블록 — 슬롯 위에 z-index 오버레이 *@
+            @foreach (var r in InRangeReservations())
+            {
+                var dayIndex = ((int)r.Date.DayOfWeek - 1 + 7) % 7;
+                if (dayIndex >= 5) continue;
+                var startRow = Math.Max(0, r.StartTime.Hour - 8) + 2;
+                var spanHours = Math.Max(1, r.EndTime.Hour - r.StartTime.Hour);
+                var col = dayIndex + 2;
+                <div class="reservation-block"
+                     style="grid-column:@col; grid-row:@startRow / span @spanHours; background-color: @r.Color;"
+                     @onclick="() => OpenEdit(r)">
+                    <div class="r-title">@r.Title</div>
+                    <div class="r-time">@r.StartTime.ToString("HH:mm")–@r.EndTime.ToString("HH:mm")</div>
+                    @if (!string.IsNullOrEmpty(r.CreatedByName))
+                    {
+                        <div class="r-by">@r.CreatedByName</div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ---------------- 예약 생성/편집 모달 ---------------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "예약 추가" : "예약 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">회의명 <span class="text-danger">*</span></label>
+                        <input class="form-control" placeholder="예: 마케팅 정기 회의" @bind="editing.Title" />
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label">날짜</label>
+                            <input type="date" class="form-control" @bind="editing.Date" />
+                            <small class="text-muted">평일만 가능</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">시작</label>
+                            <select class="form-select" @bind="startHour">
+                                @for (int h = 8; h <= 18; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">종료</label>
+                            <select class="form-select" @bind="endHour">
+                                @for (int h = 9; h <= 19; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">색상</label>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            @foreach (var c in PresetColors)
+                            {
+                                var color = c;
+                                <button type="button" class="color-swatch @(editing.Color == color ? "selected" : "")"
+                                        style="background-color: @color;"
+                                        @onclick="() => editing.Color = color"></button>
+                            }
+                            <input type="color" class="form-control form-control-color" @bind="editing.Color" />
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label">메모 (선택)</label>
+                        <textarea class="form-control" rows="2" @bind="editing.Notes"></textarea>
+                    </div>
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0 py-2">@formError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (editing.Id != 0 && CanModify(editing))
+                    {
+                        <button class="btn btn-outline-danger me-auto" @onclick="Delete">삭제</button>
+                    }
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .reservation-grid {
+        display: grid;
+        /* minmax(0, 1fr) — 콘텐츠가 길어도 열 너비를 안 키움 (CSS Grid의 흔한 함정 방어) */
+        grid-template-columns: 70px repeat(5, minmax(0, 1fr));
+        grid-template-rows: 44px repeat(11, 56px);
+        gap: 1px;
+        background: #dee2e6;
+        border: 1px solid #dee2e6;
+        box-sizing: border-box;
+    }
+    .reservation-grid .cell {
+        background: white;
+        padding: 4px;
+        text-align: center;
+        font-size: 0.85rem;
+        min-width: 0;          /* 자식 콘텐츠가 셀 너비를 키우지 못하게 */
+        min-height: 0;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+    .reservation-grid .header-cell {
+        background: #f5f5f5;
+        font-weight: 600;
+        line-height: 1.2;
+        padding-top: 6px;
+    }
+    .reservation-grid .today-header { background: #e0f0ff; }
+    .reservation-grid .time-cell {
+        background: #fafafa;
+        font-weight: 600;
+        color: #666;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px;
+    }
+    .reservation-grid .time-header {
+        background: #f5f5f5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .reservation-grid .slot-cell {
+        cursor: pointer;
+        color: transparent;
+    }
+    .reservation-grid .slot-cell:hover {
+        background: #eef5ff;
+    }
+    .reservation-grid .slot-cell:hover::before { content: "＋"; color: #888; }
+    .reservation-block {
+        z-index: 2;
+        padding: 6px 8px;
+        border-radius: 4px;
+        margin: 2px;
+        color: white;
+        cursor: pointer;
+        font-size: 0.85rem;
+        line-height: 1.25;
+        overflow: hidden;
+        min-width: 0;           /* 긴 회의명이 열 너비를 못 늘리게 */
+        text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+        transition: transform 0.1s;
+        box-sizing: border-box;
+        word-break: break-all;  /* 긴 단어도 강제 줄바꿈 */
+    }
+    .reservation-block:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .reservation-block .r-title { font-weight: 700; white-space: normal; }
+    .reservation-block .r-time { font-size: 0.75rem; opacity: 0.9; }
+    .reservation-block .r-by { font-size: 0.7rem; opacity: 0.8; }
+    /* 정기 회의 — 점선 테두리 + 약간 흐림 → 일회성과 구분 */
+    .reservation-block.recurring-block {
+        cursor: default;
+        opacity: 0.92;
+        border: 2px dashed rgba(255,255,255,0.6);
+        z-index: 1;  /* 일회성보다 뒤로 */
+    }
+    .reservation-block.recurring-block:hover { transform: none; box-shadow: none; }
+
+    .color-swatch {
+        width: 28px; height: 28px; border-radius: 50%;
+        border: 2px solid #ddd; cursor: pointer; padding: 0;
+    }
+    .color-swatch.selected { border-color: #000; transform: scale(1.15); }
+    .form-control-color { width: 44px; height: 32px; padding: 2px; }
+</style>
+
+@code {
+    private DateOnly weekMonday;
+    private List<RoomReservation>? reservations;
+    private List<RecurringMeeting>? recurringMeetings;
+    private RoomReservation? editing;
+    private int startHour = 9;
+    private int endHour = 10;
+    private string? currentUserId;
+    private string? currentUserName;
+    private bool isAdmin;
+    private bool saving;
+    private string? formError;
+
+    private static readonly string[] PresetColors =
+        { "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6b7280" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        currentUserName = authState.User.FindFirst("KoreanName")?.Value ?? authState.User.Identity?.Name;
+        isAdmin = authState.User.IsInRole("Admin");
+
+        var todayKst = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9));
+        weekMonday = MondayOf(todayKst);
+        await Load();
+    }
+
+    private static DateOnly MondayOf(DateOnly d)
+    {
+        int dow = (int)d.DayOfWeek;            // Sun=0, Mon=1, ... Sat=6
+        int offset = dow == 0 ? 6 : dow - 1;   // 일요일이면 6일 전이 월요일
+        return d.AddDays(-offset);
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var weekEnd = weekMonday.AddDays(4);
+        reservations = await db.RoomReservations.AsNoTracking()
+            .Where(r => r.Date >= weekMonday && r.Date <= weekEnd)
+            .OrderBy(r => r.Date).ThenBy(r => r.StartTime)
+            .ToListAsync();
+        recurringMeetings = await db.RecurringMeetings.AsNoTracking()
+            .Where(m => m.IsActive)
+            .ToListAsync();
+    }
+
+    // 이번 주에 보여줄 정기 회의들을 일회성 예약처럼 변환 (읽기 전용 표시용)
+    private IEnumerable<(RecurringMeeting Meeting, DateOnly Date)> RecurringInWeek()
+    {
+        if (recurringMeetings == null) yield break;
+        foreach (var m in recurringMeetings)
+        {
+            int dayOffset = ((int)m.DayOfWeek - 1 + 7) % 7;
+            if (dayOffset >= 5) continue; // 주말 제외
+            yield return (m, weekMonday.AddDays(dayOffset));
+        }
+    }
+
+    private IEnumerable<RoomReservation> InRangeReservations() =>
+        (reservations ?? Enumerable.Empty<RoomReservation>())
+            .Where(r => r.Date >= weekMonday && r.Date <= weekMonday.AddDays(4)
+                        && r.StartTime.Hour >= 8 && r.EndTime.Hour <= 19);
+
+    private async Task PrevWeek() { weekMonday = weekMonday.AddDays(-7); await Load(); }
+    private async Task NextWeek() { weekMonday = weekMonday.AddDays(7); await Load(); }
+    private async Task ResetWeek()
+    {
+        weekMonday = MondayOf(DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9)));
+        await Load();
+    }
+
+    private void OpenNew(DateOnly date, TimeOnly slotStart)
+    {
+        editing = new RoomReservation
+        {
+            Date = date,
+            StartTime = slotStart,
+            EndTime = new TimeOnly(Math.Min(slotStart.Hour + 1, 19), 0),
+            Color = PresetColors[0]
+        };
+        startHour = slotStart.Hour;
+        endHour = Math.Min(slotStart.Hour + 1, 19);
+        formError = null;
+    }
+
+    private void OpenEdit(RoomReservation r)
+    {
+        editing = new RoomReservation
+        {
+            Id = r.Id,
+            Date = r.Date,
+            StartTime = r.StartTime,
+            EndTime = r.EndTime,
+            Title = r.Title,
+            Color = r.Color,
+            Notes = r.Notes,
+            CreatedById = r.CreatedById,
+            CreatedByName = r.CreatedByName,
+            CreatedAt = r.CreatedAt
+        };
+        startHour = r.StartTime.Hour;
+        endHour = r.EndTime.Hour;
+        formError = null;
+    }
+
+    private void Cancel() { editing = null; formError = null; }
+
+    private bool CanModify(RoomReservation r) => isAdmin || (r.CreatedById != null && r.CreatedById == currentUserId);
+
+    private async Task Save()
+    {
+        if (editing == null || saving) return;
+        formError = null;
+        if (string.IsNullOrWhiteSpace(editing.Title)) { formError = "회의명을 입력해주세요."; return; }
+        if (endHour <= startHour) { formError = "종료 시간은 시작보다 늦어야 합니다."; return; }
+        var dow = editing.Date.DayOfWeek;
+        if (dow == DayOfWeek.Saturday || dow == DayOfWeek.Sunday)
+        { formError = "주말에는 예약할 수 없습니다."; return; }
+
+        editing.StartTime = new TimeOnly(startHour, 0);
+        editing.EndTime = new TimeOnly(endHour, 0);
+
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // 시간 겹침 검사 — 일회성
+            var clash = await db.RoomReservations.AsNoTracking()
+                .Where(x => x.Date == editing.Date && x.Id != editing.Id
+                            && x.StartTime < editing.EndTime && x.EndTime > editing.StartTime)
+                .FirstOrDefaultAsync();
+            if (clash != null)
+            {
+                formError = $"⛔ {clash.StartTime:HH:mm}-{clash.EndTime:HH:mm} \"{clash.Title}\" 와 시간이 겹칩니다.";
+                return;
+            }
+            // 정기 회의와도 겹침 검사
+            var recurringClash = await db.RecurringMeetings.AsNoTracking()
+                .Where(m => m.IsActive && m.DayOfWeek == editing.Date.DayOfWeek
+                            && m.StartTime < editing.EndTime && m.EndTime > editing.StartTime)
+                .FirstOrDefaultAsync();
+            if (recurringClash != null)
+            {
+                formError = $"⛔ 정기 회의 \"{recurringClash.Title}\" ({recurringClash.StartTime:HH:mm}-{recurringClash.EndTime:HH:mm})와 시간이 겹칩니다.";
+                return;
+            }
+
+            if (editing.Id == 0)
+            {
+                editing.CreatedById = currentUserId;
+                editing.CreatedByName = currentUserName;
+                editing.CreatedAt = DateTime.UtcNow;
+                db.RoomReservations.Add(editing);
+            }
+            else
+            {
+                var target = await db.RoomReservations.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                if (!CanModify(target)) { formError = "본인 예약 또는 관리자만 수정할 수 있습니다."; return; }
+                target.Date = editing.Date;
+                target.StartTime = editing.StartTime;
+                target.EndTime = editing.EndTime;
+                target.Title = editing.Title;
+                target.Color = editing.Color;
+                target.Notes = editing.Notes;
+            }
+            await db.SaveChangesAsync();
+        }
+        finally { saving = false; }
+
+        editing = null;
+        await Load();
+    }
+
+    private async Task Delete()
+    {
+        if (editing == null || editing.Id == 0) return;
+        if (!CanModify(editing)) { formError = "본인 예약 또는 관리자만 삭제할 수 있습니다."; return; }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.RoomReservations.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+        editing = null;
+        await Load();
+    }
+
+    private static string WeekdayKo(DayOfWeek dow) => dow switch
+    {
+        DayOfWeek.Monday => "월", DayOfWeek.Tuesday => "화", DayOfWeek.Wednesday => "수",
+        DayOfWeek.Thursday => "목", DayOfWeek.Friday => "금",
+        DayOfWeek.Saturday => "토", DayOfWeek.Sunday => "일", _ => "?"
+    };
+}

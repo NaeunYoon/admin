@@ -1,0 +1,116 @@
+@page "/admin/texts"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AdminApp.Services.EditableTextService EditTexts
+
+<PageTitle>화면 문구 편집</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0 fs-4">화면 문구 편집</h2>
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <span class="badge bg-success">@message</span>
+        }
+    </div>
+
+    <small class="text-muted d-block mb-3">
+        각 페이지의 큰 제목과 소제목을 여기서 일괄 편집할 수 있어요. 빈 칸으로 저장하면 기본값으로 복원됩니다.
+    </small>
+
+    @foreach (var group in Groups)
+    {
+        <div class="card shadow-sm border-0 mb-3">
+            <div class="card-body">
+                <h5 class="mb-3 fs-6 text-primary">@group.Key</h5>
+                <div class="row g-3">
+                    @foreach (var def in group.Value)
+                    {
+                        var key = def.Key;
+                        <div class="col-md-6">
+                            <label class="form-label">
+                                @def.Description
+                                <small class="text-muted ms-1">(@def.Key)</small>
+                            </label>
+                            <div class="input-group">
+                                <input class="form-control" @bind="values[key]" placeholder="@def.DefaultValue" />
+                                <button class="btn btn-outline-secondary" type="button"
+                                        title="기본값으로 복원"
+                                        @onclick="() => Reset(key, def.DefaultValue)">↺</button>
+                            </div>
+                            <small class="text-muted">기본값: @def.DefaultValue</small>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex gap-2 sticky-bottom bg-white py-3" style="bottom:0;">
+        <button class="btn btn-primary" @onclick="SaveAll" disabled="@saving">@(saving ? "저장 중..." : "✅ 모두 저장")</button>
+        <button class="btn btn-outline-secondary" @onclick="Reload">변경 취소</button>
+    </div>
+</div>
+
+@code {
+    private readonly Dictionary<string, string> values = new();
+    private bool saving;
+    private string? message;
+
+    private Dictionary<string, List<AdminApp.Services.EditableTextService.TextDefinition>> Groups =>
+        AdminApp.Services.EditableTextService.Definitions
+            .GroupBy(d => d.Group)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+    protected override async Task OnInitializedAsync()
+    {
+        await EditTexts.EnsureLoadedAsync();
+        Reload();
+    }
+
+    private void Reload()
+    {
+        values.Clear();
+        foreach (var d in AdminApp.Services.EditableTextService.Definitions)
+        {
+            values[d.Key] = EditTexts.Get(d.Key);
+        }
+        message = null;
+    }
+
+    private void Reset(string key, string defaultValue)
+    {
+        values[key] = defaultValue;
+    }
+
+    private async Task SaveAll()
+    {
+        if (saving) return;
+        saving = true;
+        try
+        {
+            int changed = 0;
+            foreach (var d in AdminApp.Services.EditableTextService.Definitions)
+            {
+                var newValue = (values[d.Key] ?? "").Trim();
+                var currentValue = EditTexts.Get(d.Key);
+                if (string.IsNullOrEmpty(newValue) || newValue == d.DefaultValue)
+                {
+                    if (currentValue != d.DefaultValue)
+                    {
+                        await EditTexts.ResetAsync(d.Key);
+                        changed++;
+                    }
+                }
+                else if (newValue != currentValue)
+                {
+                    await EditTexts.SetAsync(d.Key, newValue);
+                    changed++;
+                }
+            }
+            message = changed > 0 ? $"✅ {changed}개 항목 저장됨" : "변경 사항 없음";
+            Reload();
+        }
+        finally { saving = false; }
+    }
+}

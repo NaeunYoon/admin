@@ -1,0 +1,21 @@
+@page "/shared"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Employee")]
+@rendermode InteractiveServer
+@inject AdminApp.Services.EditableTextService Texts
+
+<PageTitle>공용 기기 / 계정</PageTitle>
+
+<div class="container-fluid py-3">
+    <h2 class="fs-4 mb-3">@Texts.Get("shared.page.title")</h2>
+
+    <div class="row g-3">
+        @* 왼쪽: 공용 기기 *@
+        <div class="col-12 col-lg-6">
+            <SharedDevicesPanel />
+        </div>
+        @* 오른쪽: 공용 계정 *@
+        <div class="col-12 col-lg-6">
+            <SharedAccountsPanel />
+        </div>
+    </div>
+</div>

@@ -1,5 +1,5 @@
 @page "/requests"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Employee")]
 @rendermode InteractiveServer
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
@@ -23,20 +23,38 @@
                             @foreach (var t in leaveTypes)
                             {
                                 <input type="radio" class="btn-check" name="ltype" id="lt-@t"
-                                       checked="@(leaveType == t)" @onchange="() => leaveType = t" autocomplete="off" />
+                                       checked="@(leaveType == t)" @onchange="() => OnLeaveTypeChanged(t)" autocomplete="off" />
                                 <label class="btn btn-outline-primary btn-sm me-1 mb-1" for="lt-@t">@t</label>
                             }
                         </div>
                     </div>
 
+                    @* 포상휴가 사용 단위 선택 (포상휴가 선택 시에만 노출) *@
+                    @if (leaveType == "포상휴가")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">사용 단위</label>
+                            <div>
+                                @foreach (var u in rewardUnits)
+                                {
+                                    <input type="radio" class="btn-check" name="runit" id="ru-@u.Value"
+                                           checked="@(rewardUnit == u.Value)" @onchange="() => OnRewardUnitChanged(u.Value)" autocomplete="off" />
+                                    <label class="btn btn-outline-success btn-sm me-1 mb-1" for="ru-@u.Value">@u.Label</label>
+                                }
+                            </div>
+                            <small class="text-muted">반일/반반일 선택 시엔 1일 안에서만 사용돼요.</small>
+                        </div>
+                    }
+
                     <div class="row g-2 mb-3">
                         <div class="col-6">
                             <label class="form-label">시작일</label>
-                            <input type="date" class="form-control" @bind="startDate" />
+                            <input type="date" class="form-control" @bind="startDate" @bind:after="SyncEndDate" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">종료일</label>
-                            <input type="date" class="form-control" @bind="endDate" disabled="@(leaveType is "반차" or "반반차")" />
+                            <input type="date" class="form-control" @bind="endDate"
+                                   disabled="@IsSingleDayType()" />
                         </div>
                     </div>
 
@@ -175,6 +193,14 @@
 
     private readonly string[] leaveTypes = { "연차", "반차", "반반차", "병가", "포상휴가" };
     private string leaveType = "연차";
+
+    private readonly (decimal Value, string Label)[] rewardUnits =
+    {
+        (1m, "전일 (1일)"),
+        (0.5m, "반일 (0.5일)"),
+        (0.25m, "반반일 (0.25일)")
+    };
+    private decimal rewardUnit = 1m;
     private DateOnly startDate = DateOnly.FromDateTime(DateTime.Today);
     private DateOnly endDate = DateOnly.FromDateTime(DateTime.Today);
     private string leaveReason = "개인사유";
@@ -212,8 +238,33 @@
     {
         if (leaveType == "반차") return 0.5m;
         if (leaveType == "반반차") return 0.25m;
+        // 포상휴가는 단위 선택 가능 (1일 / 0.5 / 0.25)
+        if (leaveType == "포상휴가" && rewardUnit < 1m) return rewardUnit;
         var days = (endDate.DayNumber - startDate.DayNumber) + 1;
         return days < 1 ? 0 : days;
+    }
+
+    // 시작일과 종료일을 같은 날로 강제해야 하는 단일일 타입인지
+    private bool IsSingleDayType() =>
+        leaveType is "반차" or "반반차"
+        || (leaveType == "포상휴가" && rewardUnit < 1m);
+
+    // 시작일 변경 시 단일일 타입이면 종료일도 따라가게
+    private void SyncEndDate()
+    {
+        if (IsSingleDayType()) endDate = startDate;
+    }
+
+    private void OnLeaveTypeChanged(string t)
+    {
+        leaveType = t;
+        SyncEndDate();
+    }
+
+    private void OnRewardUnitChanged(decimal value)
+    {
+        rewardUnit = value;
+        SyncEndDate();
     }
 
     private void CalcReward()
@@ -235,7 +286,7 @@
             UserName = user.KoreanName ?? user.Email,
             LeaveType = leaveType,
             StartDate = startDate,
-            EndDate = leaveType is "반차" or "반반차" ? startDate : endDate,
+            EndDate = (leaveType is "반차" or "반반차") || (leaveType == "포상휴가" && rewardUnit < 1m) ? startDate : endDate,
             Reason = string.IsNullOrWhiteSpace(leaveReason) ? "개인사유" : leaveReason,
             Days = days,
             Status = "대기",

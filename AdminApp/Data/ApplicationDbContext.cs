@@ -13,6 +13,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SupplyRequest> SupplyRequests => Set<SupplyRequest>();
     public DbSet<CompanyEvent> CompanyEvents => Set<CompanyEvent>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
+    public DbSet<SharedAccount> SharedAccounts => Set<SharedAccount>();
+    public DbSet<SharedDevice> SharedDevices => Set<SharedDevice>();
+    public DbSet<InsightBriefing> InsightBriefings => Set<InsightBriefing>();
+    public DbSet<InsightArticle> InsightArticles => Set<InsightArticle>();
+    public DbSet<RoomReservation> RoomReservations => Set<RoomReservation>();
+    public DbSet<ApprovalRevertLog> ApprovalRevertLogs => Set<ApprovalRevertLog>();
+    public DbSet<BugReport> BugReports => Set<BugReport>();
+    public DbSet<RecurringMeeting> RecurringMeetings => Set<RecurringMeeting>();
+    public DbSet<EditableText> EditableTexts => Set<EditableText>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -38,5 +47,23 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<LeaveRequest>().Property(x => x.Days).HasPrecision(6, 2);
         builder.Entity<RewardRecord>().Property(x => x.Amount).HasPrecision(6, 2);
         builder.Entity<RewardRecord>().Property(x => x.WorkHours).HasPrecision(6, 2);
+
+        // 편집 가능 텍스트: Key 고유
+        builder.Entity<EditableText>()
+            .Property(e => e.Key).HasMaxLength(150);
+        builder.Entity<EditableText>()
+            .HasIndex(e => e.Key).IsUnique();
+
+        // 인사이트: 하루 1개 브리핑, URL 중복 방지
+        builder.Entity<InsightBriefing>()
+            .HasIndex(b => b.BriefingDate)
+            .IsUnique();
+        // URL은 길이가 길어 인덱스 키 길이 제한에 걸릴 수 있음 → 앞 191자만 인덱싱
+        builder.Entity<InsightArticle>()
+            .Property(a => a.Url)
+            .HasMaxLength(500);
+        builder.Entity<InsightArticle>()
+            .HasIndex(a => a.Url)
+            .IsUnique();
     }
 }

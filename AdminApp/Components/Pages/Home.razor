@@ -4,6 +4,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
+@inject AdminApp.Services.EditableTextService Texts
 
 <PageTitle>홈</PageTitle>
 
@@ -14,8 +15,12 @@
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-body d-flex flex-column">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h2 class="mb-0 fs-4">📢 공지사항</h2>
-                        <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 공지 작성</button>
+                        <h2 class="mb-0 fs-4">@Texts.Get("home.notices.title")</h2>
+                        <AuthorizeView Roles="Admin,Employee">
+                            <Authorized>
+                                <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 공지 작성</button>
+                            </Authorized>
+                        </AuthorizeView>
                     </div>
 
                     @if (notices == null)
@@ -75,131 +80,15 @@
 
         @* ================= 오른쪽: 사내 일정(캘린더) ================= *@
         <div class="col-12 col-lg-6">
-            <h2 class="fs-4 mb-3">📅 사내 일정</h2>
+            <h2 class="fs-4 mb-3">@Texts.Get("home.calendar.title")</h2>
             <CalendarPanel />
         </div>
     </div>
 
-    @* ================= 비품 / 간식 요청 (2컬럼) ================= *@
+    @* ================= 하단: 에듀테크 동향 브리핑 ================= *@
     <hr class="my-4" />
-    <div class="row g-3">
-        @* 왼쪽: 비품 요청 *@
-        <div class="col-12 col-lg-6">
-            <div class="card shadow-sm border-0 h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="mb-0 fs-5">🧾 비품 요청</h4>
-                        <button class="btn btn-outline-primary btn-sm" @onclick='() => OpenSupply("비품")'>+ 요청하기</button>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-hover align-middle mb-0">
-                            <thead class="table-light">
-                                <tr><th>신청일</th><th>신청자</th><th>품목</th><th>수량</th><th>상태</th></tr>
-                            </thead>
-                            <tbody>
-                                @if (SuppliesOf("비품").Count == 0)
-                                {
-                                    <tr><td colspan="5" class="text-center text-muted">요청 내역이 없습니다.</td></tr>
-                                }
-                                else
-                                {
-                                    @foreach (var s in SuppliesOf("비품"))
-                                    {
-                                        <tr>
-                                            <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
-                                            <td>@s.UserName</td>
-                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
-                                            <td>@s.Quantity</td>
-                                            <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
-                                        </tr>
-                                    }
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        @* 오른쪽: 간식 요청 *@
-        <div class="col-12 col-lg-6">
-            <div class="card shadow-sm border-0 h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="mb-0 fs-5">🍪 간식 요청</h4>
-                        <button class="btn btn-outline-primary btn-sm" @onclick='() => OpenSupply("간식")'>+ 요청하기</button>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-hover align-middle mb-0">
-                            <thead class="table-light">
-                                <tr><th>신청일</th><th>신청자</th><th>품목</th><th>수량</th><th>상태</th></tr>
-                            </thead>
-                            <tbody>
-                                @if (SuppliesOf("간식").Count == 0)
-                                {
-                                    <tr><td colspan="5" class="text-center text-muted">요청 내역이 없습니다.</td></tr>
-                                }
-                                else
-                                {
-                                    @foreach (var s in SuppliesOf("간식"))
-                                    {
-                                        <tr>
-                                            <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
-                                            <td>@s.UserName</td>
-                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
-                                            <td>@s.Quantity</td>
-                                            <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
-                                        </tr>
-                                    }
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <InsightPanel />
 </div>
-
-@* ---------- 비품/간식 요청 모달 ---------- *@
-@if (supplyEditing != null)
-{
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">@supplyEditing.Category 요청</h5>
-                    <button type="button" class="btn-close" @onclick="() => supplyEditing = null"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">분류</label>
-                        <select class="form-select" @bind="supplyEditing.Category">
-                            <option value="비품">비품</option>
-                            <option value="간식">간식</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">품목</label>
-                        <input class="form-control" placeholder="예: A4용지, 커피믹스" @bind="supplyEditing.ItemName" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">수량</label>
-                        <input type="number" min="1" class="form-control" @bind="supplyEditing.Quantity" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">메모</label>
-                        <input class="form-control" @bind="supplyEditing.Note" />
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" @onclick="() => supplyEditing = null">취소</button>
-                    <button class="btn btn-primary" @onclick="SaveSupply">요청</button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
 
 @* ---------- 공지 작성 모달 ---------- *@
 @if (editing != null)
@@ -260,9 +149,6 @@
     private string? currentUserId;
     private string? currentUserName;
 
-    private List<SupplyRequest>? supplies;
-    private SupplyRequest? supplyEditing;
-
     // 페이징
     private const int pageSize = 10;
     private int currentPage = 1;
@@ -284,7 +170,6 @@
         currentUserId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         currentUserName = principal.FindFirst("KoreanName")?.Value ?? principal.Identity?.Name;
         await LoadNotices();
-        await LoadSupplies();
     }
 
     private async Task LoadNotices()
@@ -298,52 +183,12 @@
         if (currentPage > TotalPages) currentPage = TotalPages;
     }
 
-    private async Task LoadSupplies()
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        supplies = await db.SupplyRequests
-            .AsNoTracking()
-            .OrderByDescending(s => s.CreatedAt)
-            .Take(100)
-            .ToListAsync();
-    }
-
     private void GoToNotice(int id) => Nav.NavigateTo($"/notices/{id}");
 
     private void GoToPage(int page)
     {
         if (page < 1 || page > TotalPages) return;
         currentPage = page;
-    }
-
-    private List<SupplyRequest> SuppliesOf(string category) =>
-        (supplies ?? new()).Where(s => s.Category == category).ToList();
-
-    private static string StatusClass(string status) => status switch
-    {
-        "승인" => "bg-success",
-        "완료" => "bg-primary",
-        "반려" => "bg-danger",
-        _ => "bg-secondary"
-    };
-
-    private void OpenSupply(string category) =>
-        supplyEditing = new SupplyRequest { Quantity = 1, Category = category };
-
-    private async Task SaveSupply()
-    {
-        if (supplyEditing == null || string.IsNullOrWhiteSpace(supplyEditing.ItemName)) return;
-        supplyEditing.UserId = currentUserId ?? "";
-        supplyEditing.UserName = currentUserName;
-        supplyEditing.Status = "대기";
-        supplyEditing.CreatedAt = DateTime.UtcNow;
-        await using (var db = await DbFactory.CreateDbContextAsync())
-        {
-            db.SupplyRequests.Add(supplyEditing);
-            await db.SaveChangesAsync();
-        }
-        supplyEditing = null;
-        await LoadSupplies();
     }
 
     private void OpenNew()

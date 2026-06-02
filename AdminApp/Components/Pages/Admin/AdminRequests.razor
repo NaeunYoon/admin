@@ -14,6 +14,7 @@
         <li class="nav-item"><button class="nav-link @(tab == "leave" ? "active" : "")" @onclick='() => tab = "leave"'>휴가 (@leaves?.Count(l => l.Status == "대기") 대기)</button></li>
         <li class="nav-item"><button class="nav-link @(tab == "reward" ? "active" : "")" @onclick='() => tab = "reward"'>포상 (@rewards?.Count(r => r.Status == "대기") 대기)</button></li>
         <li class="nav-item"><button class="nav-link @(tab == "supply" ? "active" : "")" @onclick='() => tab = "supply"'>비품/간식 (@supplies?.Count(s => s.Status == "대기") 대기)</button></li>
+        <li class="nav-item"><button class="nav-link @(tab == "reverts" ? "active" : "")" @onclick='() => tab = "reverts"'>승인취소 내역 (@reverts?.Count)</button></li>
     </ul>
 
     @* ---------- 휴가 ---------- *@
@@ -44,6 +45,13 @@
                                 {
                                     <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveLeave(l)">승인</button>
                                     <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectLeave(l)">반려</button>
+                                }
+                                else if (l.Status == "승인")
+                                {
+                                    <div class="d-flex flex-column gap-1">
+                                        <small class="text-muted">@l.ApprovedByName @l.ApprovedAt?.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Leave", l.Id)'>↺ 승인취소</button>
+                                    </div>
                                 }
                                 else
                                 {
@@ -93,6 +101,13 @@
                                     <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveReward(r)">승인</button>
                                     <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectReward(r)">반려</button>
                                 }
+                                else if (r.Status == "승인")
+                                {
+                                    <div class="d-flex flex-column gap-1">
+                                        <small class="text-muted">@r.ApprovedByName</small>
+                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Reward", r.Id)'>↺ 승인취소</button>
+                                    </div>
+                                }
                                 else
                                 {
                                     <small class="text-muted">@r.ApprovedByName</small>
@@ -138,9 +153,15 @@
                                     <button class="btn btn-sm btn-success me-1" @onclick='() => SetSupplyStatus(s, "승인")'>승인</button>
                                     <button class="btn btn-sm btn-outline-danger" @onclick='() => SetSupplyStatus(s, "반려")'>반려</button>
                                 }
-                                else if (s.Status == "승인")
+                                else if (s.Status is "승인" or "완료")
                                 {
-                                    <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료 처리</button>
+                                    <div class="d-flex flex-column gap-1">
+                                        @if (s.Status == "승인")
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료 처리</button>
+                                        }
+                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Supply", s.Id)'>↺ 승인취소</button>
+                                    </div>
                                 }
                                 else
                                 {
@@ -157,7 +178,81 @@
             </table>
         </div>
     }
+
+    @* ---------- 승인취소 내역 탭 ---------- *@
+    @if (tab == "reverts")
+    {
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr><th>취소 시각</th><th>구분</th><th>대상자</th><th>분류</th><th>복원량</th><th>요약</th><th>사유</th><th>처리자</th></tr>
+                </thead>
+                <tbody>
+                    @if (reverts == null || reverts.Count == 0)
+                    {
+                        <tr><td colspan="8" class="text-center text-muted">승인취소 내역이 없습니다.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var rv in reverts)
+                        {
+                            <tr>
+                                <td><small>@rv.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
+                                <td><span class="badge bg-secondary">@RevertTypeLabel(rv.RequestType)</span></td>
+                                <td>@rv.UserName</td>
+                                <td><small>@(rv.Category ?? "-")</small></td>
+                                <td>@(rv.Amount.HasValue ? $"+{Fmt.Day(rv.Amount.Value)} 복원" : "-")</td>
+                                <td><small>@rv.Summary</small></td>
+                                <td><small>@rv.Reason</small></td>
+                                <td><small>@rv.RevertedByName</small></td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 </div>
+
+@* ---------- 승인취소 확인 모달 ---------- *@
+@if (revertingTarget != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-warning">↺ 승인취소</h5>
+                    <button type="button" class="btn-close" @onclick="CancelRevert"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2"><strong>@revertingTarget.Description</strong></p>
+                    @if (revertingTarget.Amount.HasValue && revertingTarget.Amount > 0)
+                    {
+                        <div class="alert alert-info py-2 small mb-2">
+                            ✅ 승인 시 차감했던 <strong>@Fmt.Day(revertingTarget.Amount.Value)일</strong>을 직원에게 복원합니다.
+                        </div>
+                    }
+                    <div class="alert alert-warning py-2 small mb-3">
+                        ⚠️ 이미 사용된 날짜라도 시스템상으론 복원됩니다. 직원에게 별도 안내가 필요할 수 있어요.
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label">취소 사유 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="2" placeholder="예: 실수로 승인했음, 직원 요청"
+                                  @bind="revertReason"></textarea>
+                    </div>
+                    @if (!string.IsNullOrEmpty(revertError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0 py-2">@revertError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelRevert">닫기</button>
+                    <button class="btn btn-warning" @onclick="ConfirmRevert" disabled="@reverting">@(reverting ? "처리 중..." : "승인 취소")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @* ---------- 관리자 포상 부여 모달 ---------- *@
 @if (granting)
@@ -209,10 +304,19 @@
     private List<LeaveRequest>? leaves;
     private List<RewardRecord>? rewards;
     private List<SupplyRequest>? supplies;
+    private List<ApprovalRevertLog>? reverts;
     private List<ApplicationUser> allUsers = new();
 
     private string? adminId;
     private string? adminName;
+
+    // 승인취소 모달 상태
+    private RevertTarget? revertingTarget;
+    private string revertReason = "";
+    private string? revertError;
+    private bool reverting;
+
+    private record RevertTarget(string RequestType, int RequestId, string Description, decimal? Amount);
 
     // 포상 부여 모달
     private bool granting;
@@ -236,7 +340,157 @@
         leaves = await db.LeaveRequests.AsNoTracking().OrderBy(l => l.StartDate).ThenBy(l => l.CreatedAt).ToListAsync();
         rewards = await db.RewardRecords.AsNoTracking().OrderBy(r => r.CreatedAt).ToListAsync();
         supplies = await db.SupplyRequests.AsNoTracking().OrderBy(s => s.CreatedAt).ToListAsync();
+        reverts = await db.ApprovalRevertLogs.AsNoTracking().OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync();
         allUsers = await db.Users.AsNoTracking().OrderBy(u => u.KoreanName).ToListAsync();
+    }
+
+    private static string RevertTypeLabel(string type) => type switch
+    {
+        "Leave" => "휴가", "Reward" => "포상", "Supply" => "비품/간식", _ => type
+    };
+
+    private void OpenRevert(string type, int id)
+    {
+        revertError = null;
+        revertReason = "";
+        switch (type)
+        {
+            case "Leave":
+                var l = leaves?.FirstOrDefault(x => x.Id == id);
+                if (l == null || l.Status != "승인") return;
+                revertingTarget = new RevertTarget(type, id,
+                    $"{l.UserName} · {l.LeaveType} · {l.StartDate:yyyy-MM-dd}~{l.EndDate:MM-dd} ({Fmt.Day(l.Days)}일)",
+                    l.Days);
+                break;
+            case "Reward":
+                var r = rewards?.FirstOrDefault(x => x.Id == id);
+                if (r == null || r.Status != "승인") return;
+                revertingTarget = new RevertTarget(type, id,
+                    $"{r.UserName} · 포상 {Fmt.Day(r.Amount)}일 · {r.Source}",
+                    r.Amount);
+                break;
+            case "Supply":
+                var s = supplies?.FirstOrDefault(x => x.Id == id);
+                if (s == null || s.Status is not ("승인" or "완료")) return;
+                revertingTarget = new RevertTarget(type, id,
+                    $"{s.UserName} · {s.Category} · {s.ItemName} ×{s.Quantity}",
+                    null);
+                break;
+        }
+    }
+
+    private void CancelRevert()
+    {
+        revertingTarget = null;
+        revertReason = "";
+        revertError = null;
+    }
+
+    private async Task ConfirmRevert()
+    {
+        if (revertingTarget == null || reverting) return;
+        if (string.IsNullOrWhiteSpace(revertReason)) { revertError = "취소 사유를 입력해주세요."; return; }
+
+        reverting = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var log = new ApprovalRevertLog
+            {
+                RequestType = revertingTarget.RequestType,
+                RequestId = revertingTarget.RequestId,
+                Reason = revertReason.Trim(),
+                RevertedById = adminId,
+                RevertedByName = adminName,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            switch (revertingTarget.RequestType)
+            {
+                case "Leave":
+                {
+                    var target = await db.LeaveRequests.FindAsync(revertingTarget.RequestId);
+                    if (target == null || target.Status != "승인") { revertError = "이미 처리된 항목입니다."; return; }
+                    var u = await UserManager.FindByIdAsync(target.UserId);
+                    if (u != null)
+                    {
+                        switch (target.LeaveType)
+                        {
+                            case "연차":
+                            case "반차":
+                            case "반반차": u.UsedAnnualLeave = Math.Max(0, u.UsedAnnualLeave - target.Days); break;
+                            case "병가": u.SickLeaveUsed = Math.Max(0, u.SickLeaveUsed - target.Days); break;
+                            case "포상휴가": u.UsedRewardLeave = Math.Max(0, u.UsedRewardLeave - target.Days); break;
+                        }
+                        u.UpdatedAt = DateTime.UtcNow;
+                        await UserManager.UpdateAsync(u);
+                    }
+                    log.UserId = target.UserId;
+                    log.UserName = target.UserName;
+                    log.Category = target.LeaveType;
+                    log.Amount = target.Days;
+                    log.OriginalStatus = "승인";
+                    log.Summary = $"{target.LeaveType} {target.StartDate:yyyy-MM-dd}~{target.EndDate:MM-dd} ({Fmt.Day(target.Days)}일) 승인 취소";
+                    target.Status = "승인취소";
+                    target.ApprovedById = adminId;
+                    target.ApprovedByName = adminName;
+                    target.ApprovedAt = DateTime.UtcNow;
+                    break;
+                }
+                case "Reward":
+                {
+                    var target = await db.RewardRecords.FindAsync(revertingTarget.RequestId);
+                    if (target == null || target.Status != "승인") { revertError = "이미 처리된 항목입니다."; return; }
+                    var u = await UserManager.FindByIdAsync(target.UserId);
+                    if (u != null)
+                    {
+                        u.RewardLeave = Math.Max(0, u.RewardLeave - target.Amount);
+                        u.UpdatedAt = DateTime.UtcNow;
+                        await UserManager.UpdateAsync(u);
+                    }
+                    log.UserId = target.UserId;
+                    log.UserName = target.UserName;
+                    log.Category = $"포상 ({target.Source})";
+                    log.Amount = target.Amount;
+                    log.OriginalStatus = "승인";
+                    log.Summary = $"포상 {Fmt.Day(target.Amount)}일 ({target.Source}) 승인 취소";
+                    target.Status = "승인취소";
+                    target.ApprovedById = adminId;
+                    target.ApprovedByName = adminName;
+                    target.ApprovedAt = DateTime.UtcNow;
+                    break;
+                }
+                case "Supply":
+                {
+                    var target = await db.SupplyRequests.FindAsync(revertingTarget.RequestId);
+                    if (target == null || target.Status is not ("승인" or "완료")) { revertError = "이미 처리된 항목입니다."; return; }
+                    log.UserId = target.UserId;
+                    log.UserName = target.UserName;
+                    log.Category = $"{target.Category} - {target.ItemName}";
+                    log.Amount = null;
+                    log.OriginalStatus = target.Status;
+                    log.Summary = $"{target.Category} {target.ItemName} ×{target.Quantity} ({target.Status}) 승인 취소";
+                    target.Status = "승인취소";
+                    break;
+                }
+            }
+
+            db.ApprovalRevertLogs.Add(log);
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            revertError = "오류: " + ex.Message;
+            return;
+        }
+        finally
+        {
+            reverting = false;
+        }
+
+        revertingTarget = null;
+        revertReason = "";
+        await LoadAll();
     }
 
     private IEnumerable<LeaveRequest> FilteredLeaves =>
@@ -395,6 +649,7 @@
             "승인" => "bg-success",
             "완료" => "bg-primary",
             "반려" => "bg-danger",
+            "승인취소" => "bg-warning text-dark",
             _ => "bg-secondary"
         };
         return new MarkupString($"<span class=\"badge {cls}\">{status}</span>");

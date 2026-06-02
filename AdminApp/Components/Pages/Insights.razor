@@ -1,0 +1,154 @@
+@page "/insights"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.InsightFetcherService Fetcher
+@inject AdminApp.Services.EditableTextService Texts
+@inject NavigationManager Nav
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>인사이트 아카이브</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0 fs-4">@Texts.Get("insights.page.title")</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <div class="input-group" style="max-width: 320px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input class="form-control" placeholder="제목/키워드/요약 검색"
+                       value="@searchTerm" @oninput="OnSearchChanged" />
+            </div>
+            @if (isAdmin)
+            {
+                <button class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="Refresh" disabled="@refreshing">
+                    @(refreshing ? "수집 중..." : "🔄 지금 갱신")
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="text-muted small mb-2">총 @(articles?.Count ?? 0)건 · 표시 @FilteredArticles.Count()건 · Brave Search 실시간 수집</div>
+
+    @if (articles == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else if (articles.Count == 0)
+    {
+        <div class="alert alert-light border text-center py-5">
+            <div class="fs-1">📭</div>
+            <p class="mb-0 text-muted">수집된 기사가 없습니다.</p>
+            @if (isAdmin)
+            {
+                <small class="text-muted">"지금 갱신" 버튼을 눌러 첫 수집을 시작하세요.</small>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>제목</th>
+                        <th class="d-none d-md-table-cell">날짜</th>
+                        <th class="d-none d-lg-table-cell">핵심 키워드</th>
+                        <th>한 줄 요약</th>
+                        <th class="text-end">출처</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in FilteredArticles)
+                    {
+                        <tr style="cursor:pointer;" @onclick="() => GoToDetail(a.Id)">
+                            <td>
+                                <strong class="text-decoration-none">@a.Title</strong>
+                                @if (a.FeaturedOrder > 0)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1">오늘의 픽</span>
+                                }
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <small>@(a.PublishedDate?.ToString("yyyy.MM.dd") ?? a.CreatedAt.ToLocalTime().ToString("yyyy.MM.dd"))</small>
+                            </td>
+                            <td class="d-none d-lg-table-cell">
+                                @foreach (var k in a.KeywordList)
+                                {
+                                    <span class="badge bg-light text-dark border me-1">@k</span>
+                                }
+                            </td>
+                            <td><small class="text-muted">@TruncateSummary(a.OneLineSummary)</small></td>
+                            <td class="text-end text-nowrap"><small class="text-muted">@(a.Source ?? "-")</small></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert alert-info mt-3">@message</div>
+    }
+</div>
+
+@code {
+    private List<InsightArticle>? articles;
+    private string searchTerm = "";
+    private bool isAdmin;
+    private bool refreshing;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        isAdmin = authState.User.IsInRole("Admin");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        articles = await db.InsightArticles.AsNoTracking()
+            .OrderByDescending(a => a.PublishedDate ?? DateOnly.MinValue)
+            .ThenByDescending(a => a.CreatedAt)
+            .Take(500)
+            .ToListAsync();
+    }
+
+    private IEnumerable<InsightArticle> FilteredArticles =>
+        string.IsNullOrWhiteSpace(searchTerm)
+            ? articles ?? Enumerable.Empty<InsightArticle>()
+            : (articles ?? new()).Where(a =>
+                (a.Title ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (a.OneLineSummary ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (a.Keywords ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (a.Source ?? "").Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+
+    private void OnSearchChanged(ChangeEventArgs e) => searchTerm = e.Value?.ToString() ?? "";
+
+    private void GoToDetail(int id) => Nav.NavigateTo($"/insights/{id}");
+
+    private async Task Refresh()
+    {
+        if (!isAdmin || refreshing) return;
+        refreshing = true;
+        message = "Brave Search에서 최신 기사 수집 중...";
+        try
+        {
+            var added = await Fetcher.FetchOnceAsync();
+            message = added > 0 ? $"✅ 신규 기사 {added}건 수집 완료" : "✅ 갱신 완료 (신규 기사 없음)";
+            await Load();
+        }
+        catch (Exception ex) { message = "❌ 수집 실패: " + ex.Message; }
+        finally { refreshing = false; }
+    }
+
+    private static string TruncateSummary(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "-";
+        return s.Length <= 80 ? s : s.Substring(0, 80) + "…";
+    }
+}

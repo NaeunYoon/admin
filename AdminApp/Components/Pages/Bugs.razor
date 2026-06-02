@@ -1,0 +1,331 @@
+@page "/bugs"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.EditableTextService Texts
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>버그 트래커</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0 fs-4">@Texts.Get("bugs.page.title")</h2>
+        <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 버그 신고</button>
+    </div>
+
+    <small class="text-muted d-block mb-3">사용 중 발견한 문제를 자유롭게 등록해주세요. 상태 변경은 관리자가 처리합니다.</small>
+
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+        @foreach (var f in statusFilters)
+        {
+            var filter = f;
+            <button class="btn btn-sm @(statusFilter == filter ? "btn-dark" : "btn-outline-secondary")"
+                    @onclick="() => statusFilter = filter">@filter</button>
+        }
+    </div>
+
+    @if (bugs == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else if (!FilteredBugs.Any())
+    {
+        <div class="alert alert-light border text-center py-4">
+            <div class="fs-1">🐞</div>
+            <p class="mb-0 text-muted">@(bugs.Count == 0 ? "등록된 버그가 없습니다." : "해당 상태의 항목이 없습니다.")</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>제목</th>
+                        <th class="d-none d-md-table-cell">심각도</th>
+                        <th>상태</th>
+                        <th class="d-none d-lg-table-cell">신고자</th>
+                        <th class="d-none d-md-table-cell">신고일</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var b in FilteredBugs)
+                    {
+                        <tr style="cursor:pointer;" @onclick="() => OpenDetail(b)">
+                            <td>
+                                <strong>@b.Title</strong>
+                                @if (!string.IsNullOrEmpty(b.PageUrl))
+                                {
+                                    <small class="text-muted d-block">📍 @b.PageUrl</small>
+                                }
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <span class="badge @SeverityClass(b.Severity)">@b.Severity</span>
+                            </td>
+                            <td><span class="badge @StatusClass(b.Status)">@b.Status</span></td>
+                            <td class="d-none d-lg-table-cell"><small>@b.ReporterName</small></td>
+                            <td class="d-none d-md-table-cell"><small>@b.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small></td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-link p-0" @onclick:stopPropagation @onclick="() => OpenDetail(b)">상세 →</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <small class="text-muted">총 @(bugs.Count)건 · 표시 @FilteredBugs.Count()건</small>
+    }
+</div>
+
+@* ---------- 신규 등록/상세 모달 ---------- *@
+@if (editing != null)
+{
+    var isNew = editing.Id == 0;
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isNew ? "버그 신고" : "버그 상세")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!isNew)
+                    {
+                        <div class="d-flex justify-content-between mb-2 align-items-center">
+                            <div>
+                                <span class="badge @SeverityClass(editing.Severity) me-1">@editing.Severity</span>
+                                <span class="badge @StatusClass(editing.Status)">@editing.Status</span>
+                            </div>
+                            <small class="text-muted">
+                                @editing.ReporterName · @editing.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                            </small>
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <label class="form-label">제목 <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="editing.Title" readonly="@(!CanEditFields)" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">증상/상세 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="5" placeholder="어떤 화면에서, 무엇을 하다가, 어떻게 됐는지" @bind="editing.Description" readonly="@(!CanEditFields)"></textarea>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">발생 위치 (선택)</label>
+                            <input class="form-control" placeholder="예: /reservations" @bind="editing.PageUrl" readonly="@(!CanEditFields)" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">심각도</label>
+                            <select class="form-select" @bind="editing.Severity" disabled="@(!CanEditFields && !isAdmin)">
+                                @foreach (var s in severities) { <option value="@s">@s</option> }
+                            </select>
+                        </div>
+                    </div>
+
+                    @* 관리자 영역 *@
+                    @if (isAdmin)
+                    {
+                        <hr />
+                        <h6 class="text-muted">관리자 영역</h6>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">상태</label>
+                                <select class="form-select" @bind="editing.Status">
+                                    @foreach (var s in statuses) { <option value="@s">@s</option> }
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">관리자 메모</label>
+                            <textarea class="form-control" rows="3" placeholder="처리 노트, 원인, 대처 등" @bind="editing.AdminNote"></textarea>
+                        </div>
+                    }
+                    else if (!isNew && !string.IsNullOrEmpty(editing.AdminNote))
+                    {
+                        <hr />
+                        <h6 class="text-muted">관리자 메모</h6>
+                        <div class="border rounded bg-light p-2" style="white-space: pre-wrap;">@editing.AdminNote</div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0 py-2">@formError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (!isNew && isAdmin)
+                    {
+                        <button class="btn btn-outline-danger me-auto" @onclick="Delete">삭제</button>
+                    }
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<BugReport>? bugs;
+    private BugReport? editing;
+    private bool isAdmin;
+    private bool isReporter;
+    private string? currentUserId;
+    private string? currentUserName;
+    private string statusFilter = "전체";
+    private bool saving;
+    private string? formError;
+
+    private readonly string[] severities = { "낮음", "보통", "높음", "심각" };
+    private readonly string[] statuses = { "접수", "확인중", "처리중", "해결", "보류" };
+    private readonly string[] statusFilters = { "전체", "미해결", "접수", "확인중", "처리중", "해결", "보류" };
+
+    // 신규 작성 또는 본인이 신고한 항목은 본인이 수정 가능 / 관리자는 항상 수정 가능
+    private bool CanEditFields => editing != null && (editing.Id == 0 || isAdmin || isReporter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+        isAdmin = principal.IsInRole("Admin");
+        currentUserId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        currentUserName = principal.FindFirst("KoreanName")?.Value ?? principal.Identity?.Name;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        bugs = await db.BugReports.AsNoTracking()
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
+    }
+
+    private IEnumerable<BugReport> FilteredBugs => statusFilter switch
+    {
+        "전체" => bugs ?? Enumerable.Empty<BugReport>(),
+        "미해결" => (bugs ?? new()).Where(b => b.Status != "해결"),
+        _ => (bugs ?? new()).Where(b => b.Status == statusFilter)
+    };
+
+    private void OpenNew()
+    {
+        editing = new BugReport { Severity = "보통", Status = "접수" };
+        isReporter = true;
+        formError = null;
+    }
+
+    private void OpenDetail(BugReport b)
+    {
+        editing = new BugReport
+        {
+            Id = b.Id,
+            Title = b.Title,
+            Description = b.Description,
+            PageUrl = b.PageUrl,
+            Severity = b.Severity,
+            Status = b.Status,
+            ReporterUserId = b.ReporterUserId,
+            ReporterName = b.ReporterName,
+            AdminNote = b.AdminNote,
+            CreatedAt = b.CreatedAt,
+            UpdatedAt = b.UpdatedAt,
+            ResolvedAt = b.ResolvedAt
+        };
+        isReporter = b.ReporterUserId == currentUserId;
+        formError = null;
+    }
+
+    private void Cancel() { editing = null; formError = null; }
+
+    private async Task Save()
+    {
+        if (editing == null || saving) return;
+        formError = null;
+        if (string.IsNullOrWhiteSpace(editing.Title)) { formError = "제목을 입력해주세요."; return; }
+        if (string.IsNullOrWhiteSpace(editing.Description)) { formError = "증상/상세를 입력해주세요."; return; }
+
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (editing.Id == 0)
+            {
+                var newBug = new BugReport
+                {
+                    Title = editing.Title,
+                    Description = editing.Description,
+                    PageUrl = editing.PageUrl,
+                    Severity = editing.Severity,
+                    Status = "접수",
+                    ReporterUserId = currentUserId,
+                    ReporterName = currentUserName,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                db.BugReports.Add(newBug);
+            }
+            else
+            {
+                var target = await db.BugReports.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                // 권한 체크
+                bool canEditContent = isAdmin || target.ReporterUserId == currentUserId;
+                if (canEditContent)
+                {
+                    target.Title = editing.Title;
+                    target.Description = editing.Description;
+                    target.PageUrl = editing.PageUrl;
+                    target.Severity = editing.Severity;
+                }
+                // 상태/관리자 메모는 관리자만
+                if (isAdmin)
+                {
+                    var wasResolved = target.Status == "해결";
+                    target.Status = editing.Status;
+                    target.AdminNote = editing.AdminNote;
+                    if (editing.Status == "해결" && !wasResolved) target.ResolvedAt = DateTime.UtcNow;
+                    if (editing.Status != "해결") target.ResolvedAt = null;
+                }
+                target.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { formError = "오류: " + ex.Message; return; }
+        finally { saving = false; }
+
+        editing = null;
+        await Load();
+    }
+
+    private async Task Delete()
+    {
+        if (editing == null || !isAdmin || editing.Id == 0) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.BugReports.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+        editing = null;
+        await Load();
+    }
+
+    private static string SeverityClass(string s) => s switch
+    {
+        "심각" => "bg-danger",
+        "높음" => "bg-warning text-dark",
+        "보통" => "bg-secondary",
+        "낮음" => "bg-light text-dark border",
+        _ => "bg-secondary"
+    };
+
+    private static string StatusClass(string s) => s switch
+    {
+        "접수" => "bg-primary",
+        "확인중" => "bg-info text-dark",
+        "처리중" => "bg-warning text-dark",
+        "해결" => "bg-success",
+        "보류" => "bg-secondary",
+        _ => "bg-secondary"
+    };
+}

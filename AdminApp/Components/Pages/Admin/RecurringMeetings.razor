@@ -1,0 +1,284 @@
+@page "/admin/recurring-meetings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>정기 회의 설정</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="mb-0 fs-4">정기 회의 설정</h2>
+        <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 정기 회의 추가</button>
+    </div>
+
+    <small class="text-muted d-block mb-3">
+        매주 자동으로 회의실 예약 그리드에 표시됩니다. 비활성화하면 그리드에서 사라지지만 설정은 유지돼요.
+    </small>
+
+    @if (items == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="alert alert-light border text-center py-4">
+            <div class="fs-1">🗓️</div>
+            <p class="mb-0 text-muted">등록된 정기 회의가 없습니다.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr><th>요일</th><th>시간</th><th>회의명</th><th>색상</th><th>활성</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in items)
+                    {
+                        <tr class="@(m.IsActive ? "" : "text-muted")">
+                            <td><span class="badge bg-secondary">@WeekdayKo(m.DayOfWeek)요일</span></td>
+                            <td>@m.StartTime.ToString("HH:mm") ~ @m.EndTime.ToString("HH:mm")</td>
+                            <td><strong>@m.Title</strong>@if (!string.IsNullOrEmpty(m.Notes)) { <small class="text-muted d-block">@m.Notes</small> }</td>
+                            <td>
+                                <span style="display:inline-block; width:20px; height:20px; border-radius:4px; background-color:@m.Color; vertical-align:middle;"></span>
+                                <small class="ms-1">@m.Color</small>
+                            </td>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox"
+                                           checked="@m.IsActive" @onchange="(e) => ToggleActive(m, (bool)e.Value!)" />
+                                </div>
+                            </td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(m)">편집</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(m)">삭제</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ---------- 정기 회의 편집 모달 ---------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "정기 회의 추가" : "정기 회의 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">회의명 <span class="text-danger">*</span></label>
+                        <input class="form-control" placeholder="예: 마케팅 정기, 개발팀 스탠드업" @bind="editing.Title" />
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label">요일</label>
+                            <select class="form-select" @bind="editing.DayOfWeek">
+                                <option value="@DayOfWeek.Monday">월요일</option>
+                                <option value="@DayOfWeek.Tuesday">화요일</option>
+                                <option value="@DayOfWeek.Wednesday">수요일</option>
+                                <option value="@DayOfWeek.Thursday">목요일</option>
+                                <option value="@DayOfWeek.Friday">금요일</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">시작</label>
+                            <select class="form-select" @bind="startHour">
+                                @for (int h = 8; h <= 18; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">종료</label>
+                            <select class="form-select" @bind="endHour">
+                                @for (int h = 9; h <= 19; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">색상</label>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            @foreach (var c in PresetColors)
+                            {
+                                var color = c;
+                                <button type="button" class="color-swatch @(editing.Color == color ? "selected" : "")"
+                                        style="background-color: @color;"
+                                        @onclick="() => editing.Color = color"></button>
+                            }
+                            <input type="color" class="form-control form-control-color" @bind="editing.Color" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">메모 (선택)</label>
+                        <textarea class="form-control" rows="2" @bind="editing.Notes"></textarea>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="active" @bind="editing.IsActive" />
+                        <label class="form-check-label" for="active">활성 (회의실 그리드에 표시)</label>
+                    </div>
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0 py-2">@formError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .color-swatch {
+        width: 28px; height: 28px; border-radius: 50%;
+        border: 2px solid #ddd; cursor: pointer; padding: 0;
+    }
+    .color-swatch.selected { border-color: #000; transform: scale(1.15); }
+    .form-control-color { width: 44px; height: 32px; padding: 2px; }
+</style>
+
+@code {
+    private List<RecurringMeeting>? items;
+    private RecurringMeeting? editing;
+    private int startHour = 9;
+    private int endHour = 10;
+    private string? currentUserId;
+    private string? currentUserName;
+    private bool saving;
+    private string? formError;
+
+    private static readonly string[] PresetColors =
+        { "#6366f1", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        currentUserName = authState.User.FindFirst("KoreanName")?.Value ?? authState.User.Identity?.Name;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.RecurringMeetings.AsNoTracking()
+            .OrderBy(m => m.DayOfWeek).ThenBy(m => m.StartTime)
+            .ToListAsync();
+    }
+
+    private void OpenNew()
+    {
+        editing = new RecurringMeeting
+        {
+            DayOfWeek = DayOfWeek.Monday,
+            StartTime = new TimeOnly(9, 0),
+            EndTime = new TimeOnly(10, 0),
+            Color = PresetColors[0],
+            IsActive = true
+        };
+        startHour = 9; endHour = 10;
+        formError = null;
+    }
+
+    private void OpenEdit(RecurringMeeting m)
+    {
+        editing = new RecurringMeeting
+        {
+            Id = m.Id,
+            DayOfWeek = m.DayOfWeek,
+            StartTime = m.StartTime,
+            EndTime = m.EndTime,
+            Title = m.Title,
+            Color = m.Color,
+            Notes = m.Notes,
+            IsActive = m.IsActive,
+            CreatedById = m.CreatedById,
+            CreatedByName = m.CreatedByName,
+            CreatedAt = m.CreatedAt
+        };
+        startHour = m.StartTime.Hour;
+        endHour = m.EndTime.Hour;
+        formError = null;
+    }
+
+    private void Cancel() { editing = null; formError = null; }
+
+    private async Task Save()
+    {
+        if (editing == null || saving) return;
+        formError = null;
+        if (string.IsNullOrWhiteSpace(editing.Title)) { formError = "회의명을 입력해주세요."; return; }
+        if (endHour <= startHour) { formError = "종료 시간은 시작보다 늦어야 합니다."; return; }
+        if (editing.DayOfWeek == DayOfWeek.Saturday || editing.DayOfWeek == DayOfWeek.Sunday)
+        { formError = "주말 정기 회의는 등록할 수 없습니다."; return; }
+
+        editing.StartTime = new TimeOnly(startHour, 0);
+        editing.EndTime = new TimeOnly(endHour, 0);
+
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (editing.Id == 0)
+            {
+                editing.CreatedById = currentUserId;
+                editing.CreatedByName = currentUserName;
+                editing.CreatedAt = DateTime.UtcNow;
+                editing.UpdatedAt = DateTime.UtcNow;
+                db.RecurringMeetings.Add(editing);
+            }
+            else
+            {
+                var target = await db.RecurringMeetings.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                target.DayOfWeek = editing.DayOfWeek;
+                target.StartTime = editing.StartTime;
+                target.EndTime = editing.EndTime;
+                target.Title = editing.Title;
+                target.Color = editing.Color;
+                target.Notes = editing.Notes;
+                target.IsActive = editing.IsActive;
+                target.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+        finally { saving = false; }
+        editing = null;
+        await Load();
+    }
+
+    private async Task ToggleActive(RecurringMeeting m, bool active)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var target = await db.RecurringMeetings.FindAsync(m.Id);
+        if (target == null) return;
+        target.IsActive = active;
+        target.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await Load();
+    }
+
+    private async Task Delete(RecurringMeeting m)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.RecurringMeetings.Where(x => x.Id == m.Id).ExecuteDeleteAsync();
+        await Load();
+    }
+
+    private static string WeekdayKo(DayOfWeek dow) => dow switch
+    {
+        DayOfWeek.Monday => "월", DayOfWeek.Tuesday => "화", DayOfWeek.Wednesday => "수",
+        DayOfWeek.Thursday => "목", DayOfWeek.Friday => "금", _ => "?"
+    };
+}

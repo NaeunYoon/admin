@@ -19,7 +19,7 @@
             {
                 <div class="cal-cell @(day.InMonth ? "" : "cal-out") @(day.IsToday ? "cal-today" : "")"
                      @onclick="() => OnDayClick(day.Date)">
-                    <div class="cal-daynum @(day.Date.DayOfWeek == DayOfWeek.Sunday ? "text-danger" : day.Date.DayOfWeek == DayOfWeek.Saturday ? "text-primary" : "")">
+                    <div class="cal-daynum @(day.IsToday ? "cal-daynum-today" : "") @(day.Date.DayOfWeek == DayOfWeek.Sunday ? "text-danger" : day.Date.DayOfWeek == DayOfWeek.Saturday ? "text-primary" : "")">
                         @day.Date.Day
                     </div>
                     @foreach (var ev in EventsOn(day.Date))
@@ -127,8 +127,23 @@
     .cal-cell { min-height: 90px; border: 1px solid #eee; border-radius: 6px; padding: 4px; cursor: pointer; overflow: hidden; background: #fff; }
     .cal-cell:hover { background: #f8f9fa; }
     .cal-out { background: #f5f5f5; color: #bbb; }
-    .cal-today { border: 2px solid #0d6efd; }
+    .cal-today {
+        border: 2px solid #0d6efd;
+        background: #e7f1ff;
+        box-shadow: 0 0 0 1px #0d6efd inset;
+    }
+    .cal-today:hover { background: #d6e6ff; }
     .cal-daynum { font-size: 0.85rem; font-weight: 600; margin-bottom: 2px; }
+    .cal-daynum-today {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px; height: 22px;
+        background: #0d6efd;
+        color: #fff !important;
+        border-radius: 50%;
+        font-weight: 700;
+    }
     .cal-item { font-size: 0.7rem; border-radius: 4px; padding: 1px 4px; margin-bottom: 2px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .bg-purple { background-color: #6f42c1 !important; color: #fff; }
     @@media (max-width: 576px) {
@@ -138,12 +153,16 @@
 </style>
 
 @code {
-    private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    // 컨테이너가 UTC라도 한국 사용자 기준의 "오늘"을 쓰도록 KST(UTC+9)로 계산
+    private static DateOnly TodayKst() => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9));
+
+    private DateOnly month = new(TodayKst().Year, TodayKst().Month, 1);
     private List<DayCell> days = new();
     private List<CompanyEvent> events = new();
     private List<LeaveRequest> leaves = new();
 
     private bool isAdmin;
+    private bool isGuest;
     private string? userId;
 
     private DateOnly? selectedDate;
@@ -157,6 +176,7 @@
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var principal = authState.User;
         isAdmin = principal.IsInRole("Admin");
+        isGuest = principal.IsInRole("Guest") && !principal.IsInRole("Admin") && !principal.IsInRole("Employee");
         userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         await LoadMonth();
     }
@@ -172,9 +192,17 @@
             .Where(e => e.Date >= first && e.Date <= last)
             .ToListAsync();
 
-        leaves = await db.LeaveRequests.AsNoTracking()
-            .Where(l => l.Status == "승인" && l.StartDate <= last && l.EndDate >= first)
-            .ToListAsync();
+        // 게스트(협력사)는 직원 휴가 정보(개인정보) 볼 수 없음
+        if (isGuest)
+        {
+            leaves = new();
+        }
+        else
+        {
+            leaves = await db.LeaveRequests.AsNoTracking()
+                .Where(l => l.Status == "승인" && l.StartDate <= last && l.EndDate >= first)
+                .ToListAsync();
+        }
 
         BuildGrid();
     }
@@ -185,7 +213,7 @@
         var first = month;
         var startOffset = (int)first.DayOfWeek; // 일=0
         var gridStart = first.AddDays(-startOffset);
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = TodayKst();
 
         for (int i = 0; i < 42; i++)
         {

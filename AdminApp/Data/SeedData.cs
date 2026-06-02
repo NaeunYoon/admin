@@ -10,6 +10,7 @@ public static class SeedData
 {
     public const string AdminRole = "Admin";
     public const string EmployeeRole = "Employee";
+    public const string GuestRole = "Guest";
 
     private const string AdminEmail = "admin@admin.com";
     private const string AdminPassword = "Admin1020!";
@@ -19,11 +20,15 @@ public static class SeedData
         var db = services.GetRequiredService<ApplicationDbContext>();
         await db.Database.MigrateAsync();
 
+        // 편집 가능 텍스트 캐시를 미리 로드 (이후 페이지가 즉시 사용)
+        var textSvc = services.GetService<AdminApp.Services.EditableTextService>();
+        if (textSvc != null) await textSvc.EnsureLoadedAsync();
+
         var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
 
         // Role 생성
-        foreach (var role in new[] { AdminRole, EmployeeRole })
+        foreach (var role in new[] { AdminRole, EmployeeRole, GuestRole })
         {
             if (!await roleManager.RoleExistsAsync(role))
             {

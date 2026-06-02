@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using AdminApp.Components;
 using AdminApp.Components.Account;
 using AdminApp.Data;
+using AdminApp.Services;
 using ClosedXML.Excel;
 
 namespace AdminApp;
@@ -17,6 +18,24 @@ public class Program
         // Razor / Blazor
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
+
+        // 끊긴 회로를 오래 보존 → 탭을 열어둔 채 몇 시간 뒤 돌아와도 같은 회로로 재연결.
+        // (작업하던 화면 상태가 그대로 살아남. 소규모 사내 사용이라 메모리 부담 적음)
+        builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+        {
+            options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromHours(6);  // 30분 → 6시간
+            options.DisconnectedCircuitMaxRetained = 200;
+        });
+
+        // SignalR keep-alive 강화 — 서버가 주기적으로 핑을 보내 연결을 살려둠.
+        // 탭 비활성으로 클라 핑이 느려져도 넉넉히 버티도록 ClientTimeoutInterval을 크게.
+        builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+        {
+            options.KeepAliveInterval = TimeSpan.FromSeconds(10);      // 10초마다 핑
+            options.ClientTimeoutInterval = TimeSpan.FromMinutes(5);   // 5분간 무응답이어야 끊김 판정
+            options.HandshakeTimeout = TimeSpan.FromSeconds(30);
+            options.MaximumParallelInvocationsPerClient = 2;
+        });
 
         builder.Services.AddCascadingAuthenticationState();
         builder.Services.AddScoped<IdentityUserAccessor>();
@@ -62,6 +81,28 @@ public class Program
         builder.Services.AddScoped<IUserClaimsPrincipalFactory<ApplicationUser>, AdditionalUserClaimsPrincipalFactory>();
 
         builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
+
+        // Brave Search 클라이언트 + 매일 자동 수집 백그라운드 서비스
+        builder.Services.AddHttpClient<BraveSearchService>(c =>
+        {
+            c.BaseAddress = new Uri("https://api.search.brave.com");
+            c.DefaultRequestHeaders.Add("Accept", "application/json");
+            var key = builder.Configuration["Brave:ApiKey"] ?? "";
+            if (!string.IsNullOrEmpty(key))
+            {
+                c.DefaultRequestHeaders.Add("X-Subscription-Token", key);
+            }
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            // Brave가 gzip으로 응답해도 자동 해제하도록
+            AutomaticDecompression = System.Net.DecompressionMethods.All
+        });
+        builder.Services.AddSingleton<InsightFetcherService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<InsightFetcherService>());
+
+        // 편집 가능 텍스트 서비스 (싱글톤 — 메모리 캐시)
+        builder.Services.AddSingleton<EditableTextService>();
 
         // Admin role 기반 인가 정책
         builder.Services.AddAuthorization(options =>

@@ -1,0 +1,159 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.InsightFetcherService Fetcher
+@inject AdminApp.Services.EditableTextService Texts
+@inject NavigationManager Nav
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h2 class="mb-0 fs-4">@Texts.Get("home.insight.title")</h2>
+            <div class="d-flex align-items-center gap-2">
+                @if (isAdmin)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh" disabled="@refreshing">
+                        @(refreshing ? "수집 중..." : "🔄 지금 갱신")
+                    </button>
+                }
+                <a class="btn btn-sm btn-outline-primary" href="insights">📚 아카이브 →</a>
+            </div>
+        </div>
+
+        @if (latest == null)
+        {
+            <div class="alert alert-light border text-center py-4 mb-0">
+                <div class="fs-1">📭</div>
+                <p class="mb-0 text-muted">아직 수집된 브리핑이 없습니다.</p>
+                @if (isAdmin)
+                {
+                    <small class="text-muted">"지금 갱신" 버튼을 눌러보세요. (앱 기동 직후엔 1~2분 걸릴 수 있어요)</small>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="text-muted small mb-3">
+                최종 업데이트: <strong>@latest.BriefingDate.ToString("yyyy년 M월 d일")</strong>
+                @if (!string.IsNullOrEmpty(latest.SourceNote))
+                {
+                    <span> | @latest.SourceNote</span>
+                }
+            </div>
+
+            @* 3줄 요약 *@
+            <h5 class="fs-6 fw-bold text-primary mb-2">@Texts.Get("home.insight.summary")</h5>
+            @if (latest.SummaryLines.Any())
+            {
+                <ul class="mb-4">
+                    @foreach (var line in latest.SummaryLines)
+                    {
+                        <li class="mb-2">@(line.TrimStart('-', '*', ' '))</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="text-muted small">요약이 아직 준비되지 않았습니다.</p>
+            }
+
+            @* 핵심 뉴스 리스트 *@
+            <h5 class="fs-6 fw-bold text-primary mb-2">@Texts.Get("home.insight.news")</h5>
+            @if (featured == null || featured.Count == 0)
+            {
+                <p class="text-muted small">핵심 뉴스가 아직 없습니다.</p>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var a in featured)
+                    {
+                        <a class="list-group-item list-group-item-action px-0" href="@($"/insights/{a.Id}")">
+                            <div class="d-flex align-items-start gap-2">
+                                <span class="badge bg-primary mt-1">@CircledNumber(a.FeaturedOrder)</span>
+                                <div class="flex-grow-1">
+                                    <strong>@a.Title</strong>
+                                    <small class="text-muted ms-1">
+                                        @(a.Source ?? "")
+                                        @(a.PublishedDate.HasValue ? $" · {a.PublishedDate.Value:yyyy.MM}" : "")
+                                    </small>
+                                    @if (!string.IsNullOrEmpty(a.OneLineSummary))
+                                    {
+                                        <div class="text-muted small mt-1">→ @a.OneLineSummary</div>
+                                    }
+                                </div>
+                            </div>
+                        </a>
+                    }
+                </div>
+            }
+        }
+
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert alert-info mt-3 mb-0">@message</div>
+        }
+    </div>
+</div>
+
+@code {
+    private InsightBriefing? latest;
+    private List<InsightArticle>? featured;
+    private bool isAdmin;
+    private bool refreshing;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        isAdmin = authState.User.IsInRole("Admin");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        latest = await db.InsightBriefings.AsNoTracking()
+            .OrderByDescending(b => b.BriefingDate)
+            .FirstOrDefaultAsync();
+        if (latest != null)
+        {
+            featured = await db.InsightArticles.AsNoTracking()
+                .Where(a => a.BriefingId == latest.Id)
+                .OrderBy(a => a.FeaturedOrder)
+                .ToListAsync();
+        }
+        else
+        {
+            featured = new();
+        }
+    }
+
+    private async Task Refresh()
+    {
+        if (!isAdmin || refreshing) return;
+        refreshing = true;
+        message = "Brave Search에서 최신 기사 수집 중... (10-20초 소요)";
+        try
+        {
+            var added = await Fetcher.FetchOnceAsync();
+            message = added > 0 ? $"✅ 신규 기사 {added}건 수집 완료" : "✅ 갱신 완료 (신규 기사 없음)";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            message = "❌ 수집 실패: " + ex.Message;
+        }
+        finally
+        {
+            refreshing = false;
+        }
+    }
+
+    private static string CircledNumber(int n) => n switch
+    {
+        1 => "①", 2 => "②", 3 => "③", 4 => "④", 5 => "⑤",
+        _ => n.ToString()
+    };
+}

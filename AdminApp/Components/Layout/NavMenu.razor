@@ -14,27 +14,55 @@
     <nav class="flex-column">
         <AuthorizeView>
             <Authorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> 홈
-                    </NavLink>
-                </div>
-
-                @* ---------- 개인정보 그룹 (접이식) ---------- *@
+                @* ---------- 홈 그룹 (접이식) ---------- *@
                 <details class="nav-group" open>
                     <summary class="nav-group-title px-3">
-                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> 개인정보
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> 홈
                     </summary>
                     <div class="nav-item px-3 ps-4">
-                        <NavLink class="nav-link" href="profile">내 정보</NavLink>
+                        <NavLink class="nav-link" href="" Match="NavLinkMatch.All">홈</NavLink>
                     </div>
                     <div class="nav-item px-3 ps-4">
-                        <NavLink class="nav-link" href="requests">연차 / 추가근무 상신</NavLink>
+                        <NavLink class="nav-link" href="supplies">비품 / 간식 요청</NavLink>
+                    </div>
+                    @* 공용 기기/계정은 내부 민감정보 — Guest 차단 *@
+                    <AuthorizeView Roles="Admin,Employee" Context="sharedCtx">
+                        <Authorized>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="shared">공용 기기 / 계정</NavLink>
+                            </div>
+                        </Authorized>
+                    </AuthorizeView>
+                    <div class="nav-item px-3 ps-4">
+                        <NavLink class="nav-link" href="reservations">회의실 예약</NavLink>
                     </div>
                     <div class="nav-item px-3 ps-4">
-                        <NavLink class="nav-link" href="attendance">내 근태</NavLink>
+                        <NavLink class="nav-link" href="insights">인사이트 아카이브</NavLink>
+                    </div>
+                    <div class="nav-item px-3 ps-4">
+                        <NavLink class="nav-link" href="bugs">버그 트래커</NavLink>
                     </div>
                 </details>
+
+                @* ---------- 개인정보 그룹 (Employee/Admin만) ---------- *@
+                <AuthorizeView Roles="Admin,Employee" Context="profileCtx">
+                    <Authorized>
+                        <details class="nav-group" open>
+                            <summary class="nav-group-title px-3">
+                                <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> 개인정보
+                            </summary>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="profile">내 정보</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="requests">연차 / 추가근무 상신</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="attendance">내 근태</NavLink>
+                            </div>
+                        </details>
+                    </Authorized>
+                </AuthorizeView>
 
                 @* ---------- 관리자 그룹 (접이식, Admin 전용) ---------- *@
                 <AuthorizeView Roles="Admin" Context="adminCtx">
@@ -55,6 +83,12 @@
                             </div>
                             <div class="nav-item px-3 ps-4">
                                 <NavLink class="nav-link" href="admin/employees/new">직원 등록</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="admin/recurring-meetings">정기 회의 설정</NavLink>
+                            </div>
+                            <div class="nav-item px-3 ps-4">
+                                <NavLink class="nav-link" href="admin/texts">화면 문구 편집</NavLink>
                             </div>
                         </details>
                     </Authorized>

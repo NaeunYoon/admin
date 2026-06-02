@@ -187,11 +187,12 @@ public class ApplicationUser : IdentityUser
             : ResidentRegistrationNumber;
 
     /// <summary>
-    /// 근로기준법 제60조 기반 연차 계산 (1년차 발생분 합산 방식)
+    /// 근로기준법 제60조 기반 입사 후 누적 발생 연차 (사원 보유 총 연차)
     /// - 1년 미만: 매월 1일씩 발생 (최대 11일)
-    /// - 1년 이상: 1년차 발생분(11일) + 연차(15일, 3년 이상부터 매 2년 +1일·최대 25일)
-    ///   · 만 1~2년: 11 + 15 = 26일
-    ///   · 만 3년: 11 + 16 = 27일, 만 5년: 11 + 17 = 28일 ...
+    /// - 만 1년~: 11일(1년차 발생분) + 매 1년 만기 시 그 다음 1년치 연차 누적
+    ///   · 1년 만기 후: 15, 2년 만기 후: 15, 3년 만기 후: 16, 5년 만기 후: 17 ... 최대 25
+    /// - 예: 윤나은(2023.5.8 입사 → 2026.6.2 기준 만 3년):
+    ///   11(1년차) + 15(2년차) + 15(3년차) + 16(4년차) = 57일
     /// </summary>
     public static decimal CalculateStatutoryAnnualLeave(DateOnly hireDate)
     {
@@ -200,6 +201,7 @@ public class ApplicationUser : IdentityUser
 
         var years = CalculateYears(hireDate);
 
+        // 1년 미만: 매월 1일씩 (최대 11)
         if (years < 1)
         {
             var months = ((today.Year - hireDate.Year) * 12) + (today.Month - hireDate.Month);
@@ -207,12 +209,16 @@ public class ApplicationUser : IdentityUser
             return Math.Min(Math.Max(months, 0), 11);
         }
 
-        // 1년차에 발생한 연차(최대 11일)
-        const decimal firstYearLeave = 11m;
-        // 연차(15일 기준, 3년 이상부터 가산, 최대 25일)
-        var annual = Math.Min(15 + ((years - 1) / 2), 25);
-
-        return firstYearLeave + annual;
+        // 1년 이상: 1년차 발생분 11 + 매 만기 누적
+        decimal total = 11m;
+        for (int y = 1; y <= years; y++)
+        {
+            // y년 만기 시 지급되는 연차(=다음 1년 사용분)
+            // 만 1년~2년: 15, 만 3년~4년: 16, 만 5년~6년: 17 ... 최대 25
+            decimal grant = Math.Min(15 + Math.Max(0, (y - 1) / 2), 25);
+            total += grant;
+        }
+        return total;
     }
 
     private static int CalculateAge(DateOnly birthDate)
