@@ -1,0 +1,178 @@
+@page "/admin/message"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.PushNotificationService Push
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>메시지 보내기</PageTitle>
+
+<div class="container py-3" style="max-width: 720px;">
+    <h2 class="fs-4 mb-3">메시지 보내기</h2>
+    <small class="text-muted d-block mb-3">선택한 대상에게 웹 푸시 알림과 앱 내 알림함 메시지를 보냅니다.</small>
+
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            @* ----- 대상 선택 ----- *@
+            <div class="mb-3">
+                <label class="form-label fw-bold">받는 대상 <small class="text-muted">(중복 선택 가능)</small></label>
+                <div class="d-flex gap-3 flex-wrap">
+                    @foreach (var r in roleOptions)
+                    {
+                        var role = r;
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="role-@role.Value"
+                                   checked="@selectedRoles.Contains(role.Value)"
+                                   @onchange="(e) => ToggleRole(role.Value, (bool)e.Value!)" />
+                            <label class="form-check-label" for="role-@role.Value">
+                                @role.Label
+                                <span class="badge bg-light text-dark border ms-1">@RoleCount(role.Value)명</span>
+                            </label>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @* ----- 제목 ----- *@
+            <div class="mb-3">
+                <label class="form-label">제목 <span class="text-danger">*</span></label>
+                <input class="form-control" placeholder="예: 사내 공지, 시스템 점검 안내" @bind="title" maxlength="80" />
+            </div>
+
+            @* ----- 내용 ----- *@
+            <div class="mb-3">
+                <label class="form-label">내용 <span class="text-danger">*</span></label>
+                <textarea class="form-control" rows="4" placeholder="알림으로 표시될 메시지" @bind="body" maxlength="500"></textarea>
+            </div>
+
+            @* ----- 클릭 시 이동(선택) ----- *@
+            <div class="mb-3">
+                <label class="form-label">클릭 시 이동 경로 <small class="text-muted">(선택)</small></label>
+                <input class="form-control" placeholder="예: /  또는  /notices/3" @bind="url" />
+                <small class="text-muted">비워두면 홈으로 이동합니다.</small>
+            </div>
+
+            @if (!string.IsNullOrEmpty(message))
+            {
+                <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+            }
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" @onclick="Send" disabled="@(sending || selectedRoles.Count == 0)">
+                    @(sending ? "보내는 중..." : $"📨 보내기 ({TargetCount}명)")
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="Reset" disabled="@sending">초기화</button>
+            </div>
+        </div>
+    </div>
+
+    @* ----- 최근 발송 내역 ----- *@
+    @if (history.Count > 0)
+    {
+        <h6 class="text-muted">최근 발송</h6>
+        <ul class="list-group">
+            @foreach (var h in history)
+            {
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-between">
+                        <strong>@h.Title</strong>
+                        <small class="text-muted">@h.Sent.ToString("HH:mm")</small>
+                    </div>
+                    <small class="text-muted">@h.Targets · @(h.Recipients)명 (푸시 @(h.PushDevices)명)</small>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private readonly (string Value, string Label)[] roleOptions =
+    {
+        ("Employee", "직원"),
+        ("Admin", "관리자"),
+        ("Guest", "게스트(협력사)"),
+    };
+    private HashSet<string> selectedRoles = new() { "Employee" };
+    private Dictionary<string, int> roleCounts = new();
+
+    private string title = "";
+    private string body = "";
+    private string url = "";
+    private bool sending;
+    private string? message;
+    private bool isError;
+
+    private record SentItem(string Title, string Targets, int Recipients, int PushDevices, DateTime Sent);
+    private readonly List<SentItem> history = new();
+
+    private int RoleCount(string role) => roleCounts.TryGetValue(role, out var c) ? c : 0;
+    private int TargetCount => selectedRoles.Sum(RoleCount); // 대략치(중복 역할은 실제론 덜 발송)
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCounts();
+    }
+
+    private async Task LoadCounts()
+    {
+        roleCounts.Clear();
+        foreach (var r in roleOptions)
+        {
+            var users = await UserManager.GetUsersInRoleAsync(r.Value);
+            roleCounts[r.Value] = users.Count(u => u.NotificationsEnabled);
+        }
+    }
+
+    private void ToggleRole(string role, bool isChecked)
+    {
+        if (isChecked) selectedRoles.Add(role);
+        else selectedRoles.Remove(role);
+    }
+
+    private async Task Send()
+    {
+        message = null; isError = false;
+        if (selectedRoles.Count == 0) { isError = true; message = "받는 대상을 선택해주세요."; return; }
+        if (string.IsNullOrWhiteSpace(title)) { isError = true; message = "제목을 입력해주세요."; return; }
+        if (string.IsNullOrWhiteSpace(body)) { isError = true; message = "내용을 입력해주세요."; return; }
+
+        sending = true;
+        try
+        {
+            var dest = string.IsNullOrWhiteSpace(url) ? "/" : url.Trim();
+            var (recipients, pushDevices) = await Push.SendToRolesAsync(
+                selectedRoles, title.Trim(), body.Trim(), dest, "공지");
+
+            if (recipients == 0)
+            {
+                isError = true;
+                message = "발송 대상이 없습니다. (알림을 켠 사용자가 없거나 해당 역할에 사용자가 없음)";
+            }
+            else
+            {
+                isError = false;
+                message = $"✅ {recipients}명에게 발송 완료 (그 중 {pushDevices}명은 기기 푸시 수신).";
+                var targetLabels = string.Join(", ", roleOptions.Where(r => selectedRoles.Contains(r.Value)).Select(r => r.Label));
+                history.Insert(0, new SentItem(title.Trim(), targetLabels, recipients, pushDevices, DateTime.Now));
+                if (history.Count > 5) history.RemoveAt(history.Count - 1);
+                title = ""; body = ""; url = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            isError = true;
+            message = "발송 실패: " + ex.Message;
+        }
+        finally { sending = false; }
+    }
+
+    private void Reset()
+    {
+        title = ""; body = ""; url = "";
+        selectedRoles = new() { "Employee" };
+        message = null;
+    }
+}

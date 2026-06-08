@@ -23,29 +23,47 @@
     }
     else
     {
+        @* 주차 선택 버튼 (근무시간 설정용) *@
+        <div class="d-flex gap-1 mb-2 flex-wrap align-items-center">
+            <span class="text-muted small me-1">근무시간 주차:</span>
+            @for (int w = 1; w <= WeekCount; w++)
+            {
+                var wk = w;
+                var (wf, wl) = WeekRange(wk);
+                <button class="btn btn-sm @(selectedWeek == wk ? "btn-dark" : "btn-outline-secondary")"
+                        @onclick="() => selectedWeek = wk">
+                    @(wk)주차 <small>(@(wf.Day)~@(wl.Day)일)</small>
+                </button>
+            }
+        </div>
+
+        @* 유연 근무시간 설정 (선택한 달·주차) *@
+        <WorkScheduleEditor Month="month" Week="selectedWeek" User="user" />
+
+        <h5 class="fs-6 mt-4 mb-2">이번 달 근태 기록</h5>
         <div class="row g-3 mb-3">
             <div class="col-6 col-md-3">
                 <div class="card shadow-sm border-0"><div class="card-body py-3">
-                    <h6 class="text-muted mb-1">근무일</h6>
+                    <h6 class="text-muted mb-1">근무일 <small>(이번 달)</small></h6>
                     <div class="fs-4 fw-bold text-primary">@records!.Count(r => r.CheckIn.HasValue) 일</div>
                 </div></div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card shadow-sm border-0"><div class="card-body py-3">
-                    <h6 class="text-muted mb-1">지각</h6>
+                    <h6 class="text-muted mb-1">지각 <small>(이번 달)</small></h6>
                     <div class="fs-4 fw-bold text-danger">@records!.Count(IsLate) 회</div>
                 </div></div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card shadow-sm border-0"><div class="card-body py-3">
-                    <h6 class="text-muted mb-1">총 근무시간</h6>
-                    <div class="fs-4 fw-bold">@TotalHours</div>
+                    <h6 class="text-muted mb-1">근무시간 <small>(이번 달)</small></h6>
+                    <div class="fs-4 fw-bold">@MonthHours</div>
                 </div></div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card shadow-sm border-0"><div class="card-body py-3">
                     <h6 class="text-muted mb-1">출근 기준</h6>
-                    <div class="fs-4 fw-bold">@((user.ScheduledStartTime ?? new TimeOnly(9,0)).ToString("HH:mm"))</div>
+                    <div class="fs-4 fw-bold">@((user.ScheduledStartTime ?? new TimeOnly(10,0)).ToString("HH:mm"))</div>
                 </div></div>
             </div>
         </div>
@@ -53,26 +71,28 @@
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle">
                 <thead class="table-light">
-                    <tr><th>날짜</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th></tr>
+                    <tr><th>날짜</th><th>계획 출근</th><th>실제 출근</th><th>퇴근</th><th>근무시간</th><th>상태</th></tr>
                 </thead>
                 <tbody>
                     @if (records!.Count == 0)
                     {
-                        <tr><td colspan="5" class="text-center text-muted">근태 기록이 없습니다.</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted">이번 달 근태 기록이 없습니다.</td></tr>
                     }
                     else
                     {
                         @foreach (var r in records!)
                         {
-                            <tr>
+                            var lateMin = r.CheckIn.HasValue ? (int)(r.CheckIn.Value - PlannedStart(r.WorkDate)).TotalMinutes : 0;
+                            <tr class="@(IsLate(r) ? "table-danger" : "")">
                                 <td>@r.WorkDate.ToString("MM-dd (ddd)")</td>
+                                <td><small class="text-muted">@PlannedStart(r.WorkDate).ToString("HH:mm")</small></td>
                                 <td>@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
                                 <td>@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
                                 <td>@r.WorkDisplay</td>
                                 <td>
                                     @if (IsLate(r))
                                     {
-                                        <span class="badge bg-danger">지각</span>
+                                        <span class="badge bg-danger">지각 @(lateMin)분</span>
                                     }
                                     else if (r.CheckIn.HasValue)
                                     {
@@ -92,11 +112,14 @@
     private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private ApplicationUser? user;
     private List<AttendanceRecord>? records;
+    private Dictionary<DateOnly, TimeOnly> plannedStarts = new();
+    private int selectedWeek = 1;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         user = await UserManager.GetUserAsync(authState.User);
+        ResetWeekForMonth();
         await LoadMonth();
     }
 
@@ -110,16 +133,33 @@
             .Where(r => r.UserId == user.Id && r.WorkDate >= first && r.WorkDate <= last)
             .OrderBy(r => r.WorkDate)
             .ToListAsync();
+        // 그 달의 근무시간 계획 로드 (지각 판정 기준)
+        var scheds = await db.WorkSchedules.AsNoTracking()
+            .Where(w => w.UserId == user.Id && w.Date >= first && w.Date <= last)
+            .ToListAsync();
+        plannedStarts = scheds.ToDictionary(s => s.Date, s => s.StartTime);
+    }
+
+    // 그날의 계획 출근시간 (설정 없으면 개인정보 출근예정시각, 그것도 없으면 10시)
+    private TimeOnly PlannedStart(DateOnly date) =>
+        plannedStarts.TryGetValue(date, out var t) ? t : (user?.ScheduledStartTime ?? new TimeOnly(10, 0));
+
+    // ===== 주차 계산 =====
+    private int WeekCount => (int)Math.Ceiling(DateTime.DaysInMonth(month.Year, month.Month) / 7.0);
+    private (DateOnly First, DateOnly Last) WeekRange(int week)
+    {
+        var firstDay = (week - 1) * 7 + 1;
+        var lastDay = Math.Min(week * 7, DateTime.DaysInMonth(month.Year, month.Month));
+        return (new DateOnly(month.Year, month.Month, firstDay), new DateOnly(month.Year, month.Month, lastDay));
     }
 
     private bool IsLate(AttendanceRecord r)
     {
-        if (!r.CheckIn.HasValue || user == null) return false;
-        var start = user.ScheduledStartTime ?? new TimeOnly(9, 0);
-        return r.CheckIn.Value > start;
+        if (!r.CheckIn.HasValue) return false;
+        return r.CheckIn.Value > PlannedStart(r.WorkDate);
     }
 
-    private string TotalHours
+    private string MonthHours
     {
         get
         {
@@ -128,6 +168,15 @@
         }
     }
 
-    private async Task PrevMonth() { month = month.AddMonths(-1); await LoadMonth(); }
-    private async Task NextMonth() { month = month.AddMonths(1); await LoadMonth(); }
+    // 월 이동 시 현재 주차로 초기화 (오늘이 속한 주 또는 1주차)
+    private void ResetWeekForMonth()
+    {
+        var todayKst = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9));
+        selectedWeek = (todayKst.Year == month.Year && todayKst.Month == month.Month)
+            ? (int)Math.Ceiling(todayKst.Day / 7.0)
+            : 1;
+    }
+
+    private async Task PrevMonth() { month = month.AddMonths(-1); ResetWeekForMonth(); await LoadMonth(); }
+    private async Task NextMonth() { month = month.AddMonths(1); ResetWeekForMonth(); await LoadMonth(); }
 }

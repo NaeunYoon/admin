@@ -41,18 +41,25 @@
                 </div>
             }
 
-            @* 시간 행 (08~19시 = 11블록) — 모든 셀 명시적 위치 *@
-            @for (int h = 8; h <= 18; h++)
+            @* 시간 행 (08~19시 = 30분 단위 22개 슬롯) — 모든 셀 명시적 위치 *@
+            @for (int s = 0; s < 22; s++)
             {
-                var hour = h;
-                var row = hour - 8 + 2;
-                <div class="cell time-cell" style="grid-row:@row; grid-column:1;">@(hour.ToString("D2") + ":00")</div>
+                var slotIdx = s;
+                var hour = 8 + slotIdx / 2;
+                var minute = (slotIdx % 2) * 30;
+                var time = new TimeOnly(hour, minute);
+                var row = slotIdx + 2;
+                var isHalfHour = minute == 30;
+                <div class="cell time-cell @(isHalfHour ? "time-half" : "")" style="grid-row:@row; grid-column:1;">
+                    @time.ToString("HH:mm")
+                </div>
                 @for (int d = 0; d < 5; d++)
                 {
                     var day = d;
                     var date = weekMonday.AddDays(day);
-                    <div class="cell slot-cell" style="grid-row:@row; grid-column:@(d+2);"
-                         @onclick="() => OpenNew(date, new TimeOnly(hour, 0))"></div>
+                    var slotTime = time;
+                    <div class="cell slot-cell @(isHalfHour ? "slot-half" : "")" style="grid-row:@row; grid-column:@(d+2);"
+                         @onclick="() => OpenNew(date, slotTime)"></div>
                 }
             }
 
@@ -61,11 +68,11 @@
             {
                 var dayIndex = ((int)date.DayOfWeek - 1 + 7) % 7;
                 if (dayIndex >= 5) continue;
-                var startRow = Math.Max(0, m.StartTime.Hour - 8) + 2;
-                var spanHours = Math.Max(1, m.EndTime.Hour - m.StartTime.Hour);
+                var startRow = SlotRow(m.StartTime);
+                var spanSlots = SlotSpan(m.StartTime, m.EndTime);
                 var col = dayIndex + 2;
                 <div class="reservation-block recurring-block"
-                     style="grid-column:@col; grid-row:@startRow / span @spanHours; background-color: @m.Color;"
+                     style="grid-column:@col; grid-row:@startRow / span @spanSlots; background-color: @m.Color;"
                      title="정기 회의 — 관리자 페이지에서 수정">
                     <div class="r-title">🔁 @m.Title</div>
                     <div class="r-time">@m.StartTime.ToString("HH:mm")–@m.EndTime.ToString("HH:mm")</div>
@@ -78,12 +85,16 @@
             {
                 var dayIndex = ((int)r.Date.DayOfWeek - 1 + 7) % 7;
                 if (dayIndex >= 5) continue;
-                var startRow = Math.Max(0, r.StartTime.Hour - 8) + 2;
-                var spanHours = Math.Max(1, r.EndTime.Hour - r.StartTime.Hour);
+                var startRow = SlotRow(r.StartTime);
+                var spanSlots = SlotSpan(r.StartTime, r.EndTime);
                 var col = dayIndex + 2;
                 <div class="reservation-block"
-                     style="grid-column:@col; grid-row:@startRow / span @spanHours; background-color: @r.Color;"
+                     style="grid-column:@col; grid-row:@startRow / span @spanSlots; background-color: @r.Color;"
                      @onclick="() => OpenEdit(r)">
+                    @if (!string.IsNullOrEmpty(r.Companies))
+                    {
+                        <div class="r-companies">@r.Companies</div>
+                    }
                     <div class="r-title">@r.Title</div>
                     <div class="r-time">@r.StartTime.ToString("HH:mm")–@r.EndTime.ToString("HH:mm")</div>
                     @if (!string.IsNullOrEmpty(r.CreatedByName))
@@ -99,8 +110,8 @@
 @* ---------------- 예약 생성/편집 모달 ---------------- *@
 @if (editing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="Cancel">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(editing.Id == 0 ? "예약 추가" : "예약 편집")</h5>
@@ -119,18 +130,33 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">시작</label>
-                            <select class="form-select" @bind="startHour">
-                                @for (int h = 8; h <= 18; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            <select class="form-select" @bind="startTimeStr">
+                                @foreach (var t in AllStarts) { <option value="@t.ToString("HH:mm")">@t.ToString("HH:mm")</option> }
                             </select>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">종료</label>
-                            <select class="form-select" @bind="endHour">
-                                @for (int h = 9; h <= 19; h++) { <option value="@h">@h.ToString("D2"):00</option> }
+                            <select class="form-select" @bind="endTimeStr">
+                                @foreach (var t in AllEnds) { <option value="@t.ToString("HH:mm")">@t.ToString("HH:mm")</option> }
                             </select>
                         </div>
                     </div>
                     <div class="mb-3 mt-3">
+                        <label class="form-label">참여 회사 <small class="text-muted">(중복 선택 가능)</small></label>
+                        <div class="d-flex gap-3 flex-wrap">
+                            @foreach (var co in CompanyOptions)
+                            {
+                                var name = co;
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="co-@name"
+                                           checked="@selectedCompanies.Contains(name)"
+                                           @onchange="(e) => ToggleCompany(name, (bool)e.Value!)" />
+                                    <label class="form-check-label" for="co-@name">@name</label>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">색상</label>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
                             @foreach (var c in PresetColors)
@@ -170,7 +196,8 @@
         display: grid;
         /* minmax(0, 1fr) — 콘텐츠가 길어도 열 너비를 안 키움 (CSS Grid의 흔한 함정 방어) */
         grid-template-columns: 70px repeat(5, minmax(0, 1fr));
-        grid-template-rows: 44px repeat(11, 56px);
+        /* 30분 단위 22개 슬롯 */
+        grid-template-rows: 44px repeat(22, 32px);
         gap: 1px;
         background: #dee2e6;
         border: 1px solid #dee2e6;
@@ -200,7 +227,19 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 4px;
+        padding: 2px;
+        font-size: 0.78rem;
+    }
+    /* 30분 라벨은 더 흐리게 (정시 구분) */
+    .reservation-grid .time-cell.time-half {
+        color: #aaa;
+        font-weight: 400;
+        font-size: 0.7rem;
+    }
+    /* 30분 슬롯 위쪽 경계 흐리게 → 정시 구분이 더 두드러지게 */
+    .reservation-grid .slot-cell.slot-half {
+        border-top: 1px dashed rgba(0,0,0,0.08);
+        margin-top: -1px;
     }
     .reservation-grid .time-header {
         background: #f5f5f5;
@@ -233,6 +272,20 @@
         word-break: break-all;  /* 긴 단어도 강제 줄바꿈 */
     }
     .reservation-block:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .reservation-block .r-companies {
+        font-size: 0.7rem;
+        font-weight: 700;
+        opacity: 0.95;
+        background: rgba(255,255,255,0.22);
+        border-radius: 3px;
+        padding: 1px 5px;
+        margin-bottom: 3px;
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     .reservation-block .r-title { font-weight: 700; white-space: normal; }
     .reservation-block .r-time { font-size: 0.75rem; opacity: 0.9; }
     .reservation-block .r-by { font-size: 0.7rem; opacity: 0.8; }
@@ -258,8 +311,24 @@
     private List<RoomReservation>? reservations;
     private List<RecurringMeeting>? recurringMeetings;
     private RoomReservation? editing;
-    private int startHour = 9;
-    private int endHour = 10;
+    private string startTimeStr = "09:00";
+    private string endTimeStr = "09:30";
+
+    // 30분 단위 시작·종료 옵션
+    private static readonly List<TimeOnly> AllStarts = Enumerable.Range(0, 22)
+        .Select(i => new TimeOnly(8 + i / 2, (i % 2) * 30)).ToList();   // 08:00 ~ 18:30
+    private static readonly List<TimeOnly> AllEnds = Enumerable.Range(1, 22)
+        .Select(i => new TimeOnly(8 + i / 2, (i % 2) * 30)).ToList();   // 08:30 ~ 19:00
+
+    // 그리드 위치 계산 (30분 슬롯 기준)
+    private static int SlotRow(TimeOnly t) =>
+        Math.Max(0, (t.Hour - 8) * 2 + t.Minute / 30) + 2;
+    private static int SlotSpan(TimeOnly start, TimeOnly end)
+    {
+        var startSlot = (start.Hour - 8) * 2 + start.Minute / 30;
+        var endSlot = (end.Hour - 8) * 2 + end.Minute / 30;
+        return Math.Max(1, endSlot - startSlot);
+    }
     private string? currentUserId;
     private string? currentUserName;
     private bool isAdmin;
@@ -268,6 +337,16 @@
 
     private static readonly string[] PresetColors =
         { "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6b7280" };
+
+    // 회사 옵션 (자사 + 협력 3사)
+    private static readonly string[] CompanyOptions = { "스콘", "와우키키", "메이콘", "실리콘해머" };
+    private HashSet<string> selectedCompanies = new();
+
+    private void ToggleCompany(string name, bool isChecked)
+    {
+        if (isChecked) selectedCompanies.Add(name);
+        else selectedCompanies.Remove(name);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -316,7 +395,8 @@
     private IEnumerable<RoomReservation> InRangeReservations() =>
         (reservations ?? Enumerable.Empty<RoomReservation>())
             .Where(r => r.Date >= weekMonday && r.Date <= weekMonday.AddDays(4)
-                        && r.StartTime.Hour >= 8 && r.EndTime.Hour <= 19);
+                        && r.StartTime >= new TimeOnly(8, 0)
+                        && r.EndTime <= new TimeOnly(19, 0));
 
     private async Task PrevWeek() { weekMonday = weekMonday.AddDays(-7); await Load(); }
     private async Task NextWeek() { weekMonday = weekMonday.AddDays(7); await Load(); }
@@ -328,15 +408,19 @@
 
     private void OpenNew(DateOnly date, TimeOnly slotStart)
     {
+        // 슬롯 시작에서 +30분을 종료로 (19시 넘으면 클램프)
+        var defaultEnd = slotStart.AddMinutes(30);
+        if (defaultEnd > new TimeOnly(19, 0)) defaultEnd = new TimeOnly(19, 0);
         editing = new RoomReservation
         {
             Date = date,
             StartTime = slotStart,
-            EndTime = new TimeOnly(Math.Min(slotStart.Hour + 1, 19), 0),
+            EndTime = defaultEnd,
             Color = PresetColors[0]
         };
-        startHour = slotStart.Hour;
-        endHour = Math.Min(slotStart.Hour + 1, 19);
+        selectedCompanies = new HashSet<string>();
+        startTimeStr = slotStart.ToString("HH:mm");
+        endTimeStr = defaultEnd.ToString("HH:mm");
         formError = null;
     }
 
@@ -351,16 +435,22 @@
             Title = r.Title,
             Color = r.Color,
             Notes = r.Notes,
+            Companies = r.Companies,
             CreatedById = r.CreatedById,
             CreatedByName = r.CreatedByName,
             CreatedAt = r.CreatedAt
         };
-        startHour = r.StartTime.Hour;
-        endHour = r.EndTime.Hour;
+        selectedCompanies = (r.Companies ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(c => CompanyOptions.Contains(c))
+            .ToHashSet();
+        startTimeStr = r.StartTime.ToString("HH:mm");
+        endTimeStr = r.EndTime.ToString("HH:mm");
         formError = null;
     }
 
     private void Cancel() { editing = null; formError = null; }
+    private void NoOp() { /* 모달 내부 클릭 — propagation 차단 전용 */ }
 
     private bool CanModify(RoomReservation r) => isAdmin || (r.CreatedById != null && r.CreatedById == currentUserId);
 
@@ -369,13 +459,23 @@
         if (editing == null || saving) return;
         formError = null;
         if (string.IsNullOrWhiteSpace(editing.Title)) { formError = "회의명을 입력해주세요."; return; }
-        if (endHour <= startHour) { formError = "종료 시간은 시작보다 늦어야 합니다."; return; }
+
+        if (!TimeOnly.TryParse(startTimeStr, out var st) || !TimeOnly.TryParse(endTimeStr, out var et))
+        { formError = "시간 형식이 올바르지 않습니다."; return; }
+        if (et <= st) { formError = "종료 시간은 시작보다 늦어야 합니다."; return; }
+        if (st < new TimeOnly(8, 0) || et > new TimeOnly(19, 0))
+        { formError = "예약 가능 시간은 08:00~19:00 입니다."; return; }
+
         var dow = editing.Date.DayOfWeek;
         if (dow == DayOfWeek.Saturday || dow == DayOfWeek.Sunday)
         { formError = "주말에는 예약할 수 없습니다."; return; }
 
-        editing.StartTime = new TimeOnly(startHour, 0);
-        editing.EndTime = new TimeOnly(endHour, 0);
+        editing.StartTime = st;
+        editing.EndTime = et;
+        // 선택한 회사 → CSV (옵션 정의 순서 유지)
+        editing.Companies = selectedCompanies.Count == 0
+            ? null
+            : string.Join(", ", CompanyOptions.Where(c => selectedCompanies.Contains(c)));
 
         saving = true;
         try
@@ -421,6 +521,7 @@
                 target.Title = editing.Title;
                 target.Color = editing.Color;
                 target.Notes = editing.Notes;
+                target.Companies = editing.Companies;
             }
             await db.SaveChangesAsync();
         }

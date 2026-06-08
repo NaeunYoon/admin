@@ -1,0 +1,120 @@
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode InteractiveServer
+
+<AuthorizeView>
+    <Authorized>
+        @if (visible)
+        {
+            <div class="push-toast">
+                @if (status == "denied")
+                {
+                    <small class="text-muted">알림이 차단됨 (브라우저 설정에서 허용)</small>
+                    <button class="btn btn-sm btn-link p-0 ms-2" @onclick="Dismiss">닫기</button>
+                }
+                else if (status == "subscribed")
+                {
+                    <small class="text-success">🔔 알림 받는 중</small>
+                    <button class="btn btn-sm btn-link p-0 ms-2" @onclick="Unsubscribe">해제</button>
+                }
+                else if (status == "supported")
+                {
+                    <small>알림을 켜시면 신청·승인 결과를 바로 받을 수 있어요</small>
+                    <button class="btn btn-sm btn-primary ms-2" @onclick="Subscribe" disabled="@busy">
+                        @(busy ? "처리 중..." : "🔔 알림 켜기")
+                    </button>
+                    <button class="btn btn-sm btn-link p-0 ms-1" @onclick="Dismiss">나중에</button>
+                }
+                else if (status == "unsupported")
+                {
+                    <small class="text-muted">
+                        이 브라우저는 알림 미지원
+                        @if (isIos)
+                        {
+                            <span> — 사파리에서 공유 → "홈 화면에 추가" 후 다시 열어주세요</span>
+                        }
+                    </small>
+                    <button class="btn btn-sm btn-link p-0 ms-2" @onclick="Dismiss">닫기</button>
+                }
+            </div>
+        }
+    </Authorized>
+</AuthorizeView>
+
+<style>
+    .push-toast {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 10px 14px;
+        z-index: 1500;
+        max-width: 380px;
+        font-size: 0.9rem;
+    }
+</style>
+
+@code {
+    private string status = "loading";  // loading / supported / subscribed / denied / unsupported / dismissed
+    private bool busy;
+    private bool visible = true;
+    private bool isIos;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // dismiss 했는지 sessionStorage 확인
+        try
+        {
+            var dismissed = await JS.InvokeAsync<string?>("sessionStorage.getItem", "pushDismissed");
+            if (dismissed == "1") { visible = false; StateHasChanged(); return; }
+        }
+        catch { /* SSR 단계 무시 */ }
+
+        try
+        {
+            var s = await JS.InvokeAsync<PushStatus>("adminPush.getCurrentStatus");
+            isIos = await JS.InvokeAsync<bool>("eval", "/iphone|ipad|ipod/i.test(navigator.userAgent)");
+            if (!s.Supported) status = "unsupported";
+            else if (s.Subscribed) status = "subscribed";
+            else if (s.Permission == "denied") status = "denied";
+            else status = "supported";
+        }
+        catch
+        {
+            status = "unsupported";
+        }
+        StateHasChanged();
+    }
+
+    private async Task Subscribe()
+    {
+        busy = true;
+        try
+        {
+            var res = await JS.InvokeAsync<SubscribeResult>("adminPush.subscribe");
+            if (res.Ok) status = "subscribed";
+            else if (res.Reason == "denied") status = "denied";
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Unsubscribe()
+    {
+        await JS.InvokeVoidAsync("adminPush.unsubscribe");
+        status = "supported";
+    }
+
+    private async Task Dismiss()
+    {
+        try { await JS.InvokeVoidAsync("sessionStorage.setItem", "pushDismissed", "1"); } catch { }
+        visible = false;
+    }
+
+    private record PushStatus(bool Supported, string Permission, bool Subscribed);
+    private record SubscribeResult(bool Ok, string? Reason);
+}

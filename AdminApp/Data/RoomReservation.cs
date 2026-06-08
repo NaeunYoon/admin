@@ -25,6 +25,9 @@ public class RoomReservation
     /// <summary>메모</summary>
     public string? Notes { get; set; }
 
+    /// <summary>참여 회사 (CSV: "스콘,와우키키" 형식)</summary>
+    public string? Companies { get; set; }
+
     public string? CreatedById { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -79,8 +79,8 @@
         @* 관리자: 편집 모달 *@
         @if (editing != null)
         {
-            <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-                <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="@(() => editing = null)">
+                <div class="modal-dialog modal-lg modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title">기사 편집</h5>
@@ -161,6 +161,8 @@
         editing = null;
         await Load();
     }
+
+    private void NoOp() { }
 
     private async Task Delete()
     {

@@ -120,29 +120,33 @@ public class InsightFetcherService(
             try { await Task.Delay(1100, ct); } catch { return 0; }
         }
 
-        // URL 중복 제거
+        // URL 잘라낸 후 중복 제거 (DB 컬럼이 500자라 자른 결과로 비교해야 정확)
         var deduped = allResults
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Select(r => { r.Url = Truncate(r.Url, 500); return r; })
             .GroupBy(r => r.Url, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
             .ToList();
 
         // DB에 이미 있는 URL 제외
+        var dedupedUrls = deduped.Select(d => d.Url).ToList();
         var existingUrls = await db.InsightArticles
-            .Where(a => deduped.Select(d => d.Url).Contains(a.Url))
+            .Where(a => dedupedUrls.Contains(a.Url))
             .Select(a => a.Url)
             .ToListAsync(ct);
         var existing = new HashSet<string>(existingUrls, StringComparer.OrdinalIgnoreCase);
 
         int added = 0;
+        int skippedDup = 0;
         foreach (var r in deduped)
         {
-            if (string.IsNullOrWhiteSpace(r.Url) || existing.Contains(r.Url)) continue;
+            if (existing.Contains(r.Url)) continue;
             var cleanTitle = StripHtml(r.Title);
             var cleanDesc = StripHtml(r.Description);
             db.InsightArticles.Add(new InsightArticle
             {
                 Title = Truncate(cleanTitle, 280),
-                Url = Truncate(r.Url, 500),
+                Url = r.Url,
                 Source = r.MetaUrl?.Hostname,
                 PublishedDate = ParseDate(r.PageAge ?? r.Age),
                 OneLineSummary = Truncate(cleanDesc, 400),
@@ -151,9 +155,19 @@ public class InsightFetcherService(
                 FeaturedOrder = 0,
                 CreatedAt = DateTime.UtcNow
             });
-            added++;
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                added++;
+                existing.Add(r.Url); // 같은 배치 내 중복 차단
+            }
+            catch (DbUpdateException)
+            {
+                // 동시성/잔존 중복 → 변경 무시하고 계속
+                db.ChangeTracker.Clear();
+                skippedDup++;
+            }
         }
-        if (added > 0) await db.SaveChangesAsync(ct);
 
         // 기존 데이터의 HTML 잔존도 일괄 정리 (마이그레이션 대신)
         var dirty = await db.InsightArticles

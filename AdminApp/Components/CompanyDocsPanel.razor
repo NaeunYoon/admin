@@ -1,0 +1,402 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.EditableTextService Texts
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="card shadow-sm border-0 h-100">
+    <div class="card-body d-flex flex-column">
+        @if (isGuest)
+        {
+            @* ----- 게스트 — 회색 덮개 ----- *@
+            <div class="docs-locked text-center py-5">
+                <div class="docs-lock-icon">🔒</div>
+                <h5 class="text-muted mb-1">@Texts.Get("docs.guest")</h5>
+                <small class="text-muted">직원·관리자 전용 문서함입니다.</small>
+            </div>
+        }
+        else
+        {
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h2 class="mb-0 fs-4">@Texts.Get("docs.title")</h2>
+                @if (canEdit)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ 문서 추가</button>
+                }
+            </div>
+
+            <div class="d-flex gap-1 mb-3 flex-wrap">
+                @foreach (var c in CategoryFilters)
+                {
+                    var filter = c;
+                    <button class="btn btn-sm @(category == filter ? "btn-dark" : "btn-outline-secondary")"
+                            @onclick="() => category = filter">@filter</button>
+                }
+            </div>
+
+            @if (docs == null)
+            {
+                <p class="text-muted small">로딩 중...</p>
+            }
+            else if (!Filtered.Any())
+            {
+                <div class="text-center text-muted py-4 flex-grow-1">
+                    <div class="fs-3">📄</div>
+                    <p class="mb-0 small">@(docs.Count == 0 ? "등록된 문서가 없습니다." : "해당 분류의 문서가 없습니다.")</p>
+                </div>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush flex-grow-1">
+                    @foreach (var d in Filtered)
+                    {
+                        <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0"
+                            style="cursor: pointer;" @onclick="() => OpenDetail(d)">
+                            <span class="text-truncate me-2">
+                                <span class="badge bg-secondary me-1">@d.Category</span>
+                                @d.Title
+                            </span>
+                            <small class="text-muted text-nowrap">@d.UpdatedAt.ToLocalTime().ToString("MM-dd")</small>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</div>
+
+<style>
+    .docs-locked {
+        background: linear-gradient(135deg, #f0f0f0 0%, #e2e2e2 100%);
+        border-radius: 8px;
+        margin: -1rem;
+        padding: 4rem 1rem;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    .docs-lock-icon { font-size: 2.5rem; opacity: 0.6; margin-bottom: 0.5rem; }
+</style>
+
+@* ---------- 상세 모달 ---------- *@
+@if (detailDoc != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1"
+         @onclick="CloseDetail">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down"
+             @onclick:stopPropagation="true" @onclick="NoOp">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <span class="badge bg-secondary me-1">@detailDoc.Category</span>
+                        <span class="modal-title fw-semibold">@detailDoc.Title</span>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseDetail"></button>
+                </div>
+                <div class="modal-body">
+                    <small class="text-muted d-block mb-3">
+                        @detailDoc.AuthorName · @detailDoc.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                    </small>
+                    @if (!string.IsNullOrEmpty(detailDoc.Description))
+                    {
+                        <div class="mb-3" style="white-space: pre-wrap; word-break: break-all;">@detailDoc.Description</div>
+                    }
+                    @if (detailAttachments != null && detailAttachments.Count > 0)
+                    {
+                        <hr />
+                        <h6 class="text-muted">첨부파일</h6>
+                        <ul class="list-group list-group-flush">
+                            @foreach (var a in detailAttachments)
+                            {
+                                <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                    <a href="@($"/documents/attachments/{a.Id}")" target="_blank">
+                                        📎 @a.FileName
+                                    </a>
+                                    <small class="text-muted">@FormatSize(a.Size)</small>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (canEdit)
+                    {
+                        <button class="btn btn-outline-danger me-auto" @onclick="DeleteDoc">삭제</button>
+                        <button class="btn btn-outline-secondary" @onclick="OpenEditFromDetail">편집</button>
+                    }
+                    <button class="btn btn-secondary" @onclick="CloseDetail">닫기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------- 신규/편집 모달 ---------- *@
+@if (editing != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1"
+         @onclick="Cancel">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-fullscreen-sm-down"
+             @onclick:stopPropagation="true" @onclick="NoOp">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == 0 ? "문서 추가" : "문서 편집")</h5>
+                    <button type="button" class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">분류</label>
+                            <select class="form-select" @bind="editing.Category">
+                                @foreach (var c in EditCategories) { <option value="@c">@c</option> }
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">제목 <span class="text-danger">*</span></label>
+                            <input class="form-control" placeholder="예: 입사 서약서 양식" @bind="editing.Title" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">설명</label>
+                        <textarea class="form-control" rows="5" placeholder="문서 용도, 작성 안내 등"
+                                  @bind="editing.Description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">첨부파일 <small class="text-muted">(파일당 최대 10MB, 최대 5개)</small></label>
+                        <InputFile class="form-control" OnChange="OnFilesSelected" multiple />
+                        @if (pendingFiles.Count > 0)
+                        {
+                            <ul class="list-group list-group-flush mt-2">
+                                @foreach (var f in pendingFiles)
+                                {
+                                    <li class="list-group-item px-0 py-1 d-flex justify-content-between">
+                                        <small>📎 @f.Name</small>
+                                        <small class="text-muted">@FormatSize(f.Bytes.Length)</small>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (editingExistingAttachments != null && editingExistingAttachments.Count > 0)
+                        {
+                            <ul class="list-group list-group-flush mt-2">
+                                @foreach (var a in editingExistingAttachments)
+                                {
+                                    var attachment = a;
+                                    <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-center">
+                                        <small>📎 @a.FileName (기존)</small>
+                                        <button class="btn btn-sm btn-link text-danger p-0"
+                                                @onclick="() => RemoveExisting(attachment.Id)">삭제</button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (!string.IsNullOrEmpty(uploadError))
+                        {
+                            <div class="text-danger small mt-1">@uploadError</div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="Cancel">취소</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@saving">@(saving ? "저장 중..." : "저장")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CompanyDocument>? docs;
+    private bool isGuest;
+    private bool canEdit;
+    private string? currentUserId;
+    private string? currentUserName;
+    private string category = "전체";
+
+    private static readonly string[] CategoryFilters = { "전체", "입사", "퇴사", "휴가", "연말정산", "기타" };
+    private static readonly string[] EditCategories = { "입사", "퇴사", "휴가", "연말정산", "기타" };
+
+    private CompanyDocument? detailDoc;
+    private List<CompanyDocumentAttachment>? detailAttachments;
+
+    private CompanyDocument? editing;
+    private List<CompanyDocumentAttachment>? editingExistingAttachments;
+    private readonly HashSet<int> removedAttachmentIds = new();
+    private record PendingFile(string Name, string ContentType, byte[] Bytes);
+    private readonly List<PendingFile> pendingFiles = new();
+    private string? uploadError;
+    private bool saving;
+    private const long MaxFileSize = 10 * 1024 * 1024;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var p = auth.User;
+        currentUserId = p.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        currentUserName = p.FindFirst("KoreanName")?.Value ?? p.Identity?.Name;
+        bool isAdmin = p.IsInRole("Admin");
+        bool isEmployee = p.IsInRole("Employee");
+        isGuest = !isAdmin && !isEmployee;
+        canEdit = isAdmin || isEmployee;
+        if (!isGuest) await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        docs = await db.CompanyDocuments.AsNoTracking()
+            .OrderByDescending(d => d.UpdatedAt)
+            .ToListAsync();
+    }
+
+    private IEnumerable<CompanyDocument> Filtered =>
+        category == "전체"
+            ? docs ?? Enumerable.Empty<CompanyDocument>()
+            : (docs ?? new()).Where(d => d.Category == category);
+
+    private async Task OpenDetail(CompanyDocument d)
+    {
+        detailDoc = d;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        detailAttachments = await db.CompanyDocumentAttachments.AsNoTracking()
+            .Where(a => a.DocumentId == d.Id)
+            .Select(a => new CompanyDocumentAttachment { Id = a.Id, FileName = a.FileName, Size = a.Size, ContentType = a.ContentType, DocumentId = a.DocumentId, CreatedAt = a.CreatedAt })
+            .ToListAsync();
+    }
+
+    private void CloseDetail() { detailDoc = null; detailAttachments = null; }
+
+    private void OpenNew()
+    {
+        editing = new CompanyDocument { Category = "입사" };
+        editingExistingAttachments = new();
+        removedAttachmentIds.Clear();
+        pendingFiles.Clear();
+        uploadError = null;
+    }
+
+    private void OpenEditFromDetail()
+    {
+        if (detailDoc == null) return;
+        editing = new CompanyDocument
+        {
+            Id = detailDoc.Id,
+            Title = detailDoc.Title,
+            Category = detailDoc.Category,
+            Description = detailDoc.Description,
+            AuthorId = detailDoc.AuthorId,
+            AuthorName = detailDoc.AuthorName,
+            CreatedAt = detailDoc.CreatedAt
+        };
+        editingExistingAttachments = detailAttachments?.ToList() ?? new();
+        removedAttachmentIds.Clear();
+        pendingFiles.Clear();
+        uploadError = null;
+        detailDoc = null;
+    }
+
+    private void Cancel()
+    {
+        editing = null;
+        editingExistingAttachments = null;
+        pendingFiles.Clear();
+        removedAttachmentIds.Clear();
+        uploadError = null;
+    }
+
+    private void NoOp() { }
+
+    private void RemoveExisting(int id)
+    {
+        removedAttachmentIds.Add(id);
+        editingExistingAttachments = editingExistingAttachments?.Where(a => a.Id != id).ToList();
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        uploadError = null;
+        pendingFiles.Clear();
+        foreach (var file in e.GetMultipleFiles(maximumFileCount: 5))
+        {
+            if (file.Size > MaxFileSize)
+            {
+                uploadError = $"'{file.Name}' 파일이 10MB를 초과합니다.";
+                continue;
+            }
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(MaxFileSize).CopyToAsync(ms);
+            pendingFiles.Add(new PendingFile(file.Name, file.ContentType, ms.ToArray()));
+        }
+    }
+
+    private async Task Save()
+    {
+        if (editing == null || saving || string.IsNullOrWhiteSpace(editing.Title)) return;
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (editing.Id == 0)
+            {
+                editing.AuthorId = currentUserId;
+                editing.AuthorName = currentUserName;
+                editing.CreatedAt = DateTime.UtcNow;
+                editing.UpdatedAt = DateTime.UtcNow;
+                db.CompanyDocuments.Add(editing);
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                var target = await db.CompanyDocuments.FindAsync(editing.Id);
+                if (target == null) { saving = false; editing = null; return; }
+                target.Title = editing.Title;
+                target.Category = editing.Category;
+                target.Description = editing.Description;
+                target.UpdatedAt = DateTime.UtcNow;
+                if (removedAttachmentIds.Count > 0)
+                {
+                    await db.CompanyDocumentAttachments
+                        .Where(a => removedAttachmentIds.Contains(a.Id))
+                        .ExecuteDeleteAsync();
+                }
+                await db.SaveChangesAsync();
+            }
+
+            foreach (var f in pendingFiles)
+            {
+                db.CompanyDocumentAttachments.Add(new CompanyDocumentAttachment
+                {
+                    DocumentId = editing.Id,
+                    FileName = f.Name,
+                    ContentType = f.ContentType,
+                    Size = f.Bytes.Length,
+                    Content = f.Bytes,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            if (pendingFiles.Count > 0) await db.SaveChangesAsync();
+        }
+        finally { saving = false; }
+        Cancel();
+        await Load();
+    }
+
+    private async Task DeleteDoc()
+    {
+        if (detailDoc == null || !canEdit) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.CompanyDocumentAttachments.Where(a => a.DocumentId == detailDoc.Id).ExecuteDeleteAsync();
+        await db.CompanyDocuments.Where(d => d.Id == detailDoc.Id).ExecuteDeleteAsync();
+        detailDoc = null;
+        detailAttachments = null;
+        await Load();
+    }
+
+    private static string FormatSize(long bytes) =>
+        bytes < 1024 ? $"{bytes} B"
+        : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB"
+        : $"{bytes / (1024.0 * 1024):0.#} MB";
+}

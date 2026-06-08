@@ -4,6 +4,8 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AdminApp.Services.EditableTextService Texts
+@inject AdminApp.Services.PushNotificationService Push
+@inject IJSRuntime JS
 @using Microsoft.EntityFrameworkCore
 @using AdminApp.Data
 
@@ -35,10 +37,10 @@
                                 {
                                     @foreach (var s in SuppliesOf("비품"))
                                     {
-                                        <tr>
+                                        <tr style="cursor:pointer;" @onclick="() => OpenDetail(s)">
                                             <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
                                             <td>@s.UserName</td>
-                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
+                                            <td>@s.ItemName</td>
                                             <td>@s.Quantity</td>
                                             <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
                                         </tr>
@@ -73,10 +75,10 @@
                                 {
                                     @foreach (var s in SuppliesOf("간식"))
                                     {
-                                        <tr>
+                                        <tr style="cursor:pointer;" @onclick="() => OpenDetail(s)">
                                             <td><small>@s.CreatedAt.ToLocalTime().ToString("MM-dd")</small></td>
                                             <td>@s.UserName</td>
-                                            <td>@s.ItemName @(string.IsNullOrEmpty(s.Note) ? "" : $"({s.Note})")</td>
+                                            <td>@s.ItemName</td>
                                             <td>@s.Quantity</td>
                                             <td><span class="badge @StatusClass(s.Status)">@s.Status</span></td>
                                         </tr>
@@ -91,15 +93,17 @@
     </div>
 </div>
 
-@* ---------- 요청 모달 ---------- *@
+@* ---------- 요청 작성 모달 ---------- *@
 @if (supplyEditing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1"
+         @onclick="CloseEditing">
+        <div class="modal-dialog modal-dialog-centered"
+             @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@supplyEditing.Category 요청</h5>
-                    <button type="button" class="btn-close" @onclick="() => supplyEditing = null"></button>
+                    <button type="button" class="btn-close" @onclick="CloseEditing"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
@@ -110,21 +114,90 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">품목</label>
-                        <input class="form-control" placeholder="예: A4용지, 커피믹스" @bind="supplyEditing.ItemName" />
+                        <label class="form-label">품목 <span class="text-danger">*</span></label>
+                        <input class="form-control" placeholder="예: A4용지, 새우깡, 컵라면 등 자유 입력"
+                               @bind="supplyEditing.ItemName" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">수량</label>
                         <input type="number" min="1" class="form-control" @bind="supplyEditing.Quantity" />
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">메모</label>
-                        <input class="form-control" @bind="supplyEditing.Note" />
+                    <div class="mb-0">
+                        <label class="form-label">메모 <small class="text-muted">(쿠팡 등 구매 링크 첨부 가능)</small></label>
+                        <textarea class="form-control" rows="3"
+                                  placeholder="예: https://www.coupang.com/vp/products/..."
+                                  @bind="supplyEditing.Note"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" @onclick="() => supplyEditing = null">취소</button>
+                    <button class="btn btn-secondary" @onclick="CloseEditing">취소</button>
                     <button class="btn btn-primary" @onclick="SaveSupply">요청</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------- 요청 상세 모달 ---------- *@
+@if (supplyDetail != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1"
+         @onclick="CloseDetail">
+        <div class="modal-dialog modal-dialog-centered"
+             @onclick:stopPropagation="true" @onclick="NoOp">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@supplyDetail.Category 요청 상세</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDetail"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row mb-0 small">
+                        <dt class="col-4 text-muted">신청일</dt>
+                        <dd class="col-8">@supplyDetail.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</dd>
+                        <dt class="col-4 text-muted">신청자</dt>
+                        <dd class="col-8">@supplyDetail.UserName</dd>
+                        <dt class="col-4 text-muted">분류</dt>
+                        <dd class="col-8">@supplyDetail.Category</dd>
+                        <dt class="col-4 text-muted">품목</dt>
+                        <dd class="col-8"><strong>@supplyDetail.ItemName</strong></dd>
+                        <dt class="col-4 text-muted">수량</dt>
+                        <dd class="col-8">@supplyDetail.Quantity</dd>
+                        <dt class="col-4 text-muted">상태</dt>
+                        <dd class="col-8"><span class="badge @StatusClass(supplyDetail.Status)">@supplyDetail.Status</span></dd>
+                    </dl>
+                    <hr />
+                    <div>
+                        <label class="form-label d-flex justify-content-between align-items-center">
+                            <span>메모</span>
+                            @if (!string.IsNullOrEmpty(supplyDetail.Note))
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Copy(supplyDetail.Note!)">
+                                    📋 복사
+                                </button>
+                            }
+                        </label>
+                        @if (string.IsNullOrEmpty(supplyDetail.Note))
+                        {
+                            <div class="text-muted small">메모 없음</div>
+                        }
+                        else
+                        {
+                            <div class="border rounded p-2 bg-light small" style="word-break: break-all; white-space: pre-wrap;">@supplyDetail.Note</div>
+                            @if (LooksLikeUrl(supplyDetail.Note))
+                            {
+                                <a href="@supplyDetail.Note" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2">
+                                    🔗 링크 열기
+                                </a>
+                            }
+                        }
+                    </div>
+                    @if (!string.IsNullOrEmpty(copyMessage))
+                    {
+                        <div class="alert alert-success py-1 mt-2 mb-0 small">@copyMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDetail">닫기</button>
                 </div>
             </div>
         </div>
@@ -134,8 +207,10 @@
 @code {
     private List<SupplyRequest>? supplies;
     private SupplyRequest? supplyEditing;
+    private SupplyRequest? supplyDetail;
     private string? currentUserId;
     private string? currentUserName;
+    private string? copyMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -169,6 +244,43 @@
     private void OpenSupply(string category) =>
         supplyEditing = new SupplyRequest { Quantity = 1, Category = category };
 
+    private void CloseEditing() => supplyEditing = null;
+
+    private void OpenDetail(SupplyRequest s)
+    {
+        supplyDetail = s;
+        copyMessage = null;
+    }
+
+    private void CloseDetail()
+    {
+        supplyDetail = null;
+        copyMessage = null;
+    }
+
+    private void NoOp() { /* propagation 차단 전용 */ }
+
+    private async Task Copy(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            copyMessage = "✅ 메모가 클립보드에 복사되었어요";
+        }
+        catch
+        {
+            copyMessage = "복사에 실패했어요. 직접 선택해서 복사해주세요.";
+        }
+    }
+
+    private static bool LooksLikeUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var t = text.Trim();
+        return t.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task SaveSupply()
     {
         if (supplyEditing == null || string.IsNullOrWhiteSpace(supplyEditing.ItemName)) return;
@@ -176,6 +288,12 @@
         supplyEditing.UserName = currentUserName;
         supplyEditing.Status = "대기";
         supplyEditing.CreatedAt = DateTime.UtcNow;
+
+        // 알림용 정보 캡처 (저장 후 supplyEditing은 null 처리되므로)
+        var cat = supplyEditing.Category;
+        var item = supplyEditing.ItemName;
+        var qty = supplyEditing.Quantity;
+
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
             db.SupplyRequests.Add(supplyEditing);
@@ -183,5 +301,12 @@
         }
         supplyEditing = null;
         await LoadSupplies();
+
+        // 관리자에게 알림 (인박스 + 푸시)
+        _ = Push.SendToAdminsAsync(
+            $"새 {cat} 요청",
+            $"{currentUserName} · {item} ×{qty}",
+            "/admin/requests",
+            "비품");
     }
 }

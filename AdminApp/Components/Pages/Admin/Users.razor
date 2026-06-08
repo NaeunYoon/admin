@@ -42,6 +42,7 @@
                         <th class="d-none d-xl-table-cell">년차</th>
                         <th>연차</th>
                         <th class="d-none d-md-table-cell">포상</th>
+                        <th>전체</th>
                         <th>상태</th>
                         <th>역할</th>
                         <th></th>
@@ -76,6 +77,10 @@
                                 <small class="text-muted">/@Fmt.Day(u.RewardLeave)</small>
                             </td>
                             <td>
+                                <span class="badge bg-warning text-dark">@Fmt.Day(u.RemainingAnnualLeave + u.RemainingRewardLeave)</span>
+                                <small class="text-muted d-block">연+포</small>
+                            </td>
+                            <td>
                                 @if (u.IsActive)
                                 {
                                     <span class="badge bg-success">재직</span>
@@ -91,13 +96,15 @@
                                     <span class="badge bg-info text-dark me-1">@role</span>
                                 }
                             </td>
-                            <td class="text-nowrap">
-                                <button class="btn btn-sm btn-outline-primary" @onclick="() => EditUser(u)">편집</button>
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenHistory(u)">내역</button>
-                                @if (CanDelete(u))
-                                {
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => ConfirmDelete(u)">삭제</button>
-                                }
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => EditUser(u)">편집</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenHistory(u)">내역</button>
+                                    @if (CanDelete(u))
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => ConfirmDelete(u)">삭제</button>
+                                    }
+                                </div>
                             </td>
                         </tr>
                     }
@@ -112,8 +119,8 @@
 @* ---------------- 편집 모달 ---------------- *@
 @if (editing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CancelEdit">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable modal-fullscreen-md-down" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -293,8 +300,8 @@
 @* ---------------- 내역 모달 ---------------- *@
 @if (historyUser != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseHistory">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(historyUser.KoreanName ?? historyUser.Email) 내역</h5>
@@ -366,8 +373,8 @@
 @* ---------------- 직원 삭제 확인 모달 ---------------- *@
 @if (deletingUser != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CancelDelete">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title text-danger">직원 삭제</h5>
@@ -646,6 +653,8 @@
         editing = null;
         saveMessage = null;
     }
+
+    private void NoOp() { /* 모달 내부 클릭 propagation 차단 */ }
 
     private void ApplyStatutoryLeave()
     {

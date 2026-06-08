@@ -74,8 +74,8 @@
 @* ---------- 편집 모달 ---------- *@
 @if (editing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="Cancel">
+        <div class="modal-dialog modal-lg modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(editing.Id == 0 ? "기기 추가" : "기기 편집")</h5>
@@ -182,6 +182,7 @@
     }
 
     private void Cancel() => editing = null;
+    private void NoOp() { }
 
     private async Task Save()
     {

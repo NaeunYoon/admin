@@ -22,6 +22,10 @@ public class EditableTextService(IDbContextFactory<ApplicationDbContext> dbFacto
         new("home.insight.summary", "3줄 요약", "홈 — 인사이트 위젯 소제목 (요약)", "홈"),
         new("home.insight.news", "핵심 뉴스 리스트", "홈 — 인사이트 위젯 소제목 (뉴스)", "홈"),
 
+        // === 사내 문서함 ===
+        new("docs.title", "사내 문서함", "홈 — 사내 문서함 제목", "사내 문서함"),
+        new("docs.guest", "사내 문서", "홈 — 게스트에게 보이는 덮개 문구", "사내 문서함"),
+
         // === 비품/간식 ===
         new("supplies.page.title", "비품 / 간식 요청", "비품/간식 — 페이지 큰 제목", "비품/간식"),
         new("supplies.items.title", "비품 요청", "비품/간식 — 비품 카드 소제목", "비품/간식"),

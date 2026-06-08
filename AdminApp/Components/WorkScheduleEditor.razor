@@ -1,0 +1,270 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h5 class="mb-0 fs-5">근무시간 설정 <small class="text-muted">(@(Week)주차)</small></h5>
+            <small class="text-muted">변경은 <strong>전날까지</strong>만 가능 · 당일·지난 날은 잠금 · 미설정 시 출근예정시각</small>
+        </div>
+
+        @if (loaded)
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th>날짜</th><th>출근</th><th>퇴근</th><th>근무</th><th>실제/지각</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in weekdays)
+                        {
+                            var day = d;
+                            var p = plan.TryGetValue(day, out var pp) ? pp : (Start: defaultStart, End: defaultEnd);
+                            var fullLeave = IsFullDayLeave(day);
+                            var editable = day > today && !fullLeave;
+                            var leaveLbl = LeaveLabel(day);
+                            <tr style="background-color:@(fullLeave ? "#f1f1f1" : StartColor(p.Start));">
+                                <td>
+                                    <strong>@day.ToString("M/d")</strong>
+                                    <small class="text-muted">(@WeekdayKo(day.DayOfWeek))</small>
+                                    @if (day == today) { <span class="badge bg-primary ms-1">오늘</span> }
+                                    @if (leaveLbl != null) { <span class="badge bg-info text-dark ms-1">@leaveLbl</span> }
+                                </td>
+                                @if (fullLeave)
+                                {
+                                    <td colspan="3" class="text-muted"><em>휴무 (@leaveLbl)</em></td>
+                                }
+                                else
+                                {
+                                    <td>
+                                        @if (editable)
+                                        {
+                                            <select class="form-select form-select-sm" style="width:auto; display:inline-block;"
+                                                    value="@p.Start.ToString("HH:mm")" @onchange="(e) => OnChangeStart(day, (string)e.Value!)">
+                                                @foreach (var t in StartOptions) { <option value="@t.ToString("HH:mm")">@t.ToString("HH:mm")</option> }
+                                            </select>
+                                        }
+                                        else { <span>@p.Start.ToString("HH:mm")</span> }
+                                    </td>
+                                    <td>
+                                        @if (editable)
+                                        {
+                                            <select class="form-select form-select-sm" style="width:auto; display:inline-block;"
+                                                    value="@p.End.ToString("HH:mm")" @onchange="(e) => OnChangeEnd(day, (string)e.Value!)">
+                                                @foreach (var t in EndOptions) { <option value="@t.ToString("HH:mm")">@t.ToString("HH:mm")</option> }
+                                            </select>
+                                        }
+                                        else { <span>@p.End.ToString("HH:mm")</span> }
+                                    </td>
+                                    <td><small class="text-muted">@WorkHours(p.Start, p.End)</small></td>
+                                }
+                                <td>@LateCell(day, p.Start)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="d-flex gap-2 mt-2 flex-wrap small align-items-center">
+                <span class="badge" style="background-color:#86efac; color:#000;">8시대 출근</span>
+                <span class="badge" style="background-color:#93c5fd; color:#000;">9시대 출근</span>
+                <span class="badge" style="background-color:#fdba74; color:#000;">10시대 출근</span>
+                <span class="text-muted">· 🔒 변경 불가</span>
+            </div>
+
+            @if (!string.IsNullOrEmpty(savedMsg))
+            {
+                <small class="text-success d-block mt-2">@savedMsg</small>
+            }
+        }
+        else
+        {
+            <p class="text-muted small mb-0">로딩 중...</p>
+        }
+    </div>
+</div>
+
+@code {
+    // 출근 08:00~13:30 (반차 오후 출근 대응), 퇴근 12:00~19:30 (반차 오전 퇴근 대응)
+    private static readonly TimeOnly[] StartOptions =
+        Enumerable.Range(0, 12).Select(i => new TimeOnly(8, 0).AddMinutes(i * 30)).ToArray();
+    private static readonly TimeOnly[] EndOptions =
+        Enumerable.Range(0, 16).Select(i => new TimeOnly(12, 0).AddMinutes(i * 30)).ToArray();
+    private static readonly TimeOnly MaxEnd = new(19, 30);
+    private TimeOnly defaultStart = new(10, 0); // 미설정 기본: 개인정보 출근예정시각(없으면 10시)
+    private TimeOnly defaultEnd = new(19, 0);
+
+    [Parameter] public DateOnly Month { get; set; }
+    [Parameter] public int Week { get; set; } = 1;
+    [Parameter] public ApplicationUser? User { get; set; }
+
+    private string? userId;
+    private string? userName;
+    private DateOnly today;
+    private List<DateOnly> weekdays = new();
+    private Dictionary<DateOnly, (TimeOnly Start, TimeOnly End)> plan = new();
+    private Dictionary<DateOnly, AttendanceRecord> actuals = new();
+    private Dictionary<DateOnly, (string Type, string? Period)> leaveMap = new();
+    private bool loaded;
+    private string? savedMsg;
+
+    // 종일 휴가면 근무시간 설정 비활성화.
+    // 연차·병가는 항상 종일. 포상휴가는 시간대(Period)가 없을 때(=전일)만 종일.
+    private bool IsFullDayLeave(DateOnly d)
+    {
+        if (!leaveMap.TryGetValue(d, out var lv)) return false;
+        if (lv.Type is "연차" or "병가") return true;
+        if (lv.Type == "포상휴가" && string.IsNullOrEmpty(lv.Period)) return true;
+        return false; // 반차/반반차, 시간대 있는 포상 = 부분 휴가
+    }
+
+    private string? LeaveLabel(DateOnly d)
+    {
+        if (!leaveMap.TryGetValue(d, out var lv)) return null;
+        return lv.Type switch
+        {
+            "반차" => $"{lv.Period} 반차",
+            "반반차" => $"반반차 {lv.Period}",
+            "포상휴가" => string.IsNullOrEmpty(lv.Period) ? "포상휴가" : $"포상 {lv.Period}",
+            _ => lv.Type
+        };
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (User == null) { loaded = false; return; }
+        userId = User.Id;
+        userName = User.KoreanName ?? User.UserName;
+        defaultStart = User.ScheduledStartTime ?? new TimeOnly(10, 0);
+        var de = defaultStart.AddHours(9);
+        defaultEnd = de > MaxEnd ? MaxEnd : de;
+
+        today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9)); // KST
+        // 선택한 달·주차의 평일만
+        var (first, last) = WeekRangeFor(Month, Week);
+        weekdays = Enumerable.Range(0, (last.DayNumber - first.DayNumber) + 1)
+            .Select(i => first.AddDays(i))
+            .Where(d => d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday)
+            .ToList();
+
+        await LoadData();
+        loaded = true;
+    }
+
+    private static (DateOnly First, DateOnly Last) WeekRangeFor(DateOnly month, int week)
+    {
+        if (week < 1) week = 1;
+        int daysInMonth = DateTime.DaysInMonth(month.Year, month.Month);
+        int firstDay = Math.Min((week - 1) * 7 + 1, daysInMonth);
+        int lastDay = Math.Min(week * 7, daysInMonth);
+        return (new DateOnly(month.Year, month.Month, firstDay), new DateOnly(month.Year, month.Month, lastDay));
+    }
+
+    private async Task LoadData()
+    {
+        plan.Clear(); actuals.Clear(); leaveMap.Clear();
+        if (userId == null || weekdays.Count == 0) return;
+        var first = weekdays.First();
+        var last = weekdays.Last();
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var saved = await db.WorkSchedules.AsNoTracking()
+            .Where(w => w.UserId == userId && w.Date >= first && w.Date <= last)
+            .ToListAsync();
+        var dict = saved.ToDictionary(s => s.Date, s => s);
+        foreach (var d in weekdays)
+            plan[d] = dict.TryGetValue(d, out var s) ? (s.StartTime, s.EndTime) : (defaultStart, defaultEnd);
+
+        var recs = await db.AttendanceRecords.AsNoTracking()
+            .Where(r => r.UserId == userId && r.WorkDate >= first && r.WorkDate <= last)
+            .ToListAsync();
+        actuals = recs.GroupBy(r => r.WorkDate).ToDictionary(g => g.Key, g => g.First());
+
+        // 승인된 휴가 로드 → 날짜별 매핑 (연차 등 기간 휴가는 모든 날에 적용)
+        var leaves = await db.LeaveRequests.AsNoTracking()
+            .Where(l => l.UserId == userId && l.Status == "승인" && l.StartDate <= last && l.EndDate >= first)
+            .ToListAsync();
+        leaveMap.Clear();
+        foreach (var lv in leaves)
+            for (var d = lv.StartDate; d <= lv.EndDate; d = d.AddDays(1))
+                if (d >= first && d <= last) leaveMap[d] = (lv.LeaveType, lv.Period);
+    }
+
+    private async Task OnChangeStart(DateOnly date, string value)
+    {
+        if (date <= today || !TimeOnly.TryParse(value, out var st)) return;
+        // 출근 변경 시 퇴근 = 출근 + 9시간 (8h 근무 + 1h 점심). 19:30 넘으면 19:30으로 조정.
+        var end = st.AddHours(9);
+        if (end > MaxEnd) end = MaxEnd;
+        if (end <= st) end = st.AddMinutes(30);
+        plan[date] = (st, end);
+        await Save(date, st, end);
+    }
+
+    private async Task OnChangeEnd(DateOnly date, string value)
+    {
+        if (date <= today || !TimeOnly.TryParse(value, out var et)) return;
+        var start = plan.TryGetValue(date, out var pp) ? pp.Start : defaultStart;
+        if (et <= start) return;
+        plan[date] = (start, et);
+        await Save(date, start, et);
+    }
+
+    private async Task Save(DateOnly date, TimeOnly start, TimeOnly end)
+    {
+        if (userId == null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.WorkSchedules.FirstOrDefaultAsync(w => w.UserId == userId && w.Date == date);
+        TimeOnly? oldStart = existing?.StartTime;
+        TimeOnly? oldEnd = existing?.EndTime;
+
+        if (existing == null)
+            db.WorkSchedules.Add(new WorkSchedule { UserId = userId, Date = date, StartTime = start, EndTime = end });
+        else { existing.StartTime = start; existing.EndTime = end; existing.UpdatedAt = DateTime.UtcNow; }
+
+        db.ScheduleChangeLogs.Add(new ScheduleChangeLog
+        {
+            UserId = userId, UserName = userName, Date = date,
+            OldStart = oldStart, OldEnd = oldEnd, NewStart = start, NewEnd = end,
+            ChangedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        savedMsg = $"✅ {date:M/d} 근무시간 저장됨 ({start:HH:mm}~{end:HH:mm})";
+    }
+
+    // 실제 출근 기록 대비 지각 여부 셀
+    private RenderFragment LateCell(DateOnly date, TimeOnly plannedStart) => builder =>
+    {
+        if (!actuals.TryGetValue(date, out var rec) || !rec.CheckIn.HasValue)
+        {
+            builder.OpenElement(0, "small");
+            builder.AddAttribute(1, "class", "text-muted");
+            builder.AddContent(2, date <= today ? "기록 없음" : "-");
+            builder.CloseElement();
+            return;
+        }
+        var late = rec.CheckIn.Value > plannedStart;
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", late ? "badge bg-danger" : "badge bg-success");
+        builder.AddContent(2, $"{rec.CheckIn.Value:HH:mm} {(late ? "지각" : "정상")}");
+        builder.CloseElement();
+    };
+
+    private static string WorkHours(TimeOnly s, TimeOnly e)
+    {
+        var mins = (e - s).TotalMinutes;
+        return $"{(int)(mins / 60)}h{((int)mins % 60 == 0 ? "" : $" {(int)mins % 60}m")}";
+    }
+
+    private static string StartColor(TimeOnly start) => start.Hour switch
+    {
+        8 => "#86efac33", 9 => "#93c5fd33", 10 => "#fdba7433", _ => "transparent"
+    };
+
+    private static string WeekdayKo(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday => "월", DayOfWeek.Tuesday => "화", DayOfWeek.Wednesday => "수",
+        DayOfWeek.Thursday => "목", DayOfWeek.Friday => "금", _ => "?"
+    };
+}

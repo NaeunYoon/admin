@@ -11,8 +11,16 @@ public class LeaveRequest
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
 
-    /// <summary>연차 / 반차 / 병가 / 포상휴가</summary>
+    /// <summary>연차 / 반차 / 반반차 / 병가 / 포상휴가</summary>
     public string LeaveType { get; set; } = "연차";
+
+    /// <summary>
+    /// 반차/반반차 시간대 구분.
+    /// 반차: "오전" / "오후"
+    /// 반반차: "1교시"(오전 전반) / "2교시"(오전 후반) / "3교시"(오후 전반) / "4교시"(오후 후반)
+    /// 종일(연차/병가/포상): null
+    /// </summary>
+    public string? Period { get; set; }
 
     public string Reason { get; set; } = "개인사유";
 

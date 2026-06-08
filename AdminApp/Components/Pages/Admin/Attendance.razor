@@ -7,8 +7,19 @@
 <PageTitle>근태 관리</PageTitle>
 
 <div class="container-fluid py-3">
-    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-        <h2 class="mb-0">근태 관리</h2>
+    <h2 class="mb-3">근태 관리</h2>
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><button class="nav-link @(tab == "records" ? "active" : "")" @onclick='() => tab = "records"'>근태 기록</button></li>
+        <li class="nav-item"><button class="nav-link @(tab == "schedule" ? "active" : "")" @onclick='() => tab = "schedule"'>근무 일정</button></li>
+    </ul>
+
+    @if (tab == "schedule")
+    {
+        <ScheduleGrid />
+    }
+    else
+    {
+    <div class="d-flex flex-wrap justify-content-end align-items-center mb-3 gap-2">
         <div class="d-flex gap-2 align-items-center">
             <button class="btn btn-outline-secondary btn-sm" @onclick="PrevMonth">◀</button>
             <strong>@month.ToString("yyyy년 M월")</strong>
@@ -50,7 +61,15 @@
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle">
                 <thead class="table-light">
-                    <tr><th>날짜</th><th>사번</th><th>이름</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>지각</th><th>출처</th><th></th></tr>
+                    <tr>
+                        <th role="button" @onclick='() => Sort("date")'>날짜 @SortIcon("date")</th>
+                        <th role="button" @onclick='() => Sort("emp")'>사번 @SortIcon("emp")</th>
+                        <th role="button" @onclick='() => Sort("name")'>이름 @SortIcon("name")</th>
+                        <th role="button" @onclick='() => Sort("in")'>출근 @SortIcon("in")</th>
+                        <th>퇴근</th><th>근무시간</th>
+                        <th role="button" @onclick='() => Sort("late")'>지각 @SortIcon("late")</th>
+                        <th>출처</th><th></th>
+                    </tr>
                 </thead>
                 <tbody>
                     @if (Filtered.Count == 0)
@@ -91,13 +110,14 @@
         </div>
         <small class="text-muted">표시 @Filtered.Count 건</small>
     }
+    }
 </div>
 
 @* ---------- 수동 입력/편집 모달 ---------- *@
 @if (editing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="@(() => editing = null)">
+        <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(editing.Id == 0 ? "근태 수동 입력" : "근태 편집")</h5>
@@ -147,10 +167,22 @@
 }
 
 @code {
+    private void NoOp() { }
+    private string tab = "records";
     private DateOnly month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private List<ApplicationUser> users = new();
     private List<AttendanceRecord>? records;
     private string filterUserId = "";
+
+    // 정렬
+    private string sortCol = "date";
+    private bool sortAsc = true;
+    private void Sort(string col)
+    {
+        if (sortCol == col) sortAsc = !sortAsc;
+        else { sortCol = col; sortAsc = true; }
+    }
+    private string SortIcon(string col) => sortCol == col ? (sortAsc ? "▲" : "▼") : "";
 
     private AttendanceRecord? editing;
     private string editUserId = "";
@@ -177,8 +209,30 @@
             .ToListAsync();
     }
 
-    private List<AttendanceRecord> Filtered =>
-        (records ?? new()).Where(r => string.IsNullOrEmpty(filterUserId) || r.UserId == filterUserId).ToList();
+    private List<AttendanceRecord> Filtered
+    {
+        get
+        {
+            var q = (records ?? new()).Where(r => string.IsNullOrEmpty(filterUserId) || r.UserId == filterUserId);
+            IOrderedEnumerable<AttendanceRecord> ordered = sortCol switch
+            {
+                "emp" => sortAsc ? q.OrderBy(r => EmpNoKey(r.EmployeeNumber)) : q.OrderByDescending(r => EmpNoKey(r.EmployeeNumber)),
+                "name" => sortAsc ? q.OrderBy(r => NameOf(r.UserId)) : q.OrderByDescending(r => NameOf(r.UserId)),
+                "in" => sortAsc ? q.OrderBy(r => r.CheckIn ?? TimeOnly.MaxValue) : q.OrderByDescending(r => r.CheckIn ?? TimeOnly.MinValue),
+                "late" => sortAsc ? q.OrderBy(r => IsLate(r)) : q.OrderByDescending(r => IsLate(r)),
+                _ => sortAsc ? q.OrderBy(r => r.WorkDate) : q.OrderByDescending(r => r.WorkDate),
+            };
+            // 2차 정렬: 날짜 → 사번
+            return ordered.ThenBy(r => r.WorkDate).ThenBy(r => EmpNoKey(r.EmployeeNumber)).ToList();
+        }
+    }
+
+    private static long EmpNoKey(string? empNo)
+    {
+        if (string.IsNullOrWhiteSpace(empNo)) return long.MaxValue;
+        var digits = new string(empNo.Where(char.IsDigit).ToArray());
+        return long.TryParse(digits, out var n) ? n : long.MaxValue - 1;
+    }
 
     private string NameOf(string? userId) =>
         users.FirstOrDefault(u => u.Id == userId)?.KoreanName ?? "(미매칭)";
@@ -187,7 +241,7 @@
     {
         if (!r.CheckIn.HasValue) return false;
         var u = users.FirstOrDefault(x => x.Id == r.UserId);
-        var start = u?.ScheduledStartTime ?? new TimeOnly(9, 0);
+        var start = u?.ScheduledStartTime ?? new TimeOnly(10, 0);
         return r.CheckIn.Value > start;
     }
 

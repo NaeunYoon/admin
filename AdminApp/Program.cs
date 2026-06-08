@@ -9,6 +9,12 @@ using ClosedXML.Excel;
 
 namespace AdminApp;
 
+/// <summary>앱 시작(=재배포)마다 바뀌는 정적 자원 캐시 버스팅 스탬프.</summary>
+public static class AssetVersion
+{
+    public static readonly string Stamp = DateTime.UtcNow.Ticks.ToString("x");
+}
+
 public class Program
 {
     public static async Task Main(string[] args)
@@ -104,6 +110,12 @@ public class Program
         // 편집 가능 텍스트 서비스 (싱글톤 — 메모리 캐시)
         builder.Services.AddSingleton<EditableTextService>();
 
+        // 웹 푸시 발송 서비스
+        builder.Services.AddSingleton<PushNotificationService>();
+
+        // 페이지 사용 통계 서비스
+        builder.Services.AddSingleton<PageStatService>();
+
         // Admin role 기반 인가 정책
         builder.Services.AddAuthorization(options =>
         {
@@ -142,6 +154,69 @@ public class Program
 
         app.MapAdditionalIdentityEndpoints();
 
+        // ========================== 푸시 알림 API ==========================
+        // VAPID 키 한 번 초기화 (앱 시작 직후 호출)
+        using (var initScope = app.Services.CreateScope())
+        {
+            var pushSvc = initScope.ServiceProvider.GetRequiredService<PushNotificationService>();
+            await pushSvc.EnsureVapidAsync();
+        }
+
+        // 클라이언트가 VAPID public key 요청 (구독 시 필요)
+        app.MapGet("/api/push/vapid-public-key", (PushNotificationService push) =>
+            Results.Json(new { publicKey = push.GetPublicKey() }));
+
+        // 푸시 구독 등록 (로그인 필요)
+        app.MapPost("/api/push/subscribe", async (
+            PushSubscribeRequest req,
+            HttpContext ctx,
+            IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        {
+            var userId = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(req.Endpoint)) return Results.BadRequest("endpoint required");
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var existing = await db.PushSubscriptions.FirstOrDefaultAsync(s => s.Endpoint == req.Endpoint);
+            if (existing == null)
+            {
+                db.PushSubscriptions.Add(new PushSubscriptionEntry
+                {
+                    UserId = userId,
+                    Endpoint = req.Endpoint,
+                    P256dh = req.P256dh ?? "",
+                    Auth = req.Auth ?? "",
+                    UserAgent = req.UserAgent,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                existing.UserId = userId;
+                existing.P256dh = req.P256dh ?? existing.P256dh;
+                existing.Auth = req.Auth ?? existing.Auth;
+                existing.UserAgent = req.UserAgent ?? existing.UserAgent;
+            }
+            await db.SaveChangesAsync();
+            return Results.Ok();
+        }).RequireAuthorization();
+
+        // 푸시 구독 해제
+        app.MapPost("/api/push/unsubscribe", async (
+            PushUnsubscribeRequest req,
+            HttpContext ctx,
+            IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        {
+            var userId = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(req.Endpoint)) return Results.BadRequest();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.PushSubscriptions
+                .Where(s => s.Endpoint == req.Endpoint && s.UserId == userId)
+                .ExecuteDeleteAsync();
+            return Results.Ok();
+        }).RequireAuthorization();
+
         // 공지 첨부파일 다운로드 (로그인 필요)
         app.MapGet("/notices/attachments/{id:int}", async (int id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
         {
@@ -150,6 +225,15 @@ public class Program
             if (att == null) return Results.NotFound();
             return Results.File(att.Content, att.ContentType ?? "application/octet-stream", att.FileName);
         }).RequireAuthorization();
+
+        // 사내 문서 첨부파일 다운로드 (직원/관리자만 — Guest 차단)
+        app.MapGet("/documents/attachments/{id:int}", async (int id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var att = await db.CompanyDocumentAttachments.FindAsync(id);
+            if (att == null) return Results.NotFound();
+            return Results.File(att.Content, att.ContentType ?? "application/octet-stream", att.FileName);
+        }).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = "Admin,Employee" });
 
         // 월별 근태 엑셀 리포트 (관리자 전용)
         app.MapGet("/admin/attendance/export", async (int year, int month, IDbContextFactory<ApplicationDbContext> dbFactory) =>
@@ -205,3 +289,7 @@ public class Program
         app.Run();
     }
 }
+
+// 푸시 구독 API 페이로드
+public record PushSubscribeRequest(string Endpoint, string? P256dh, string? Auth, string? UserAgent);
+public record PushUnsubscribeRequest(string Endpoint);

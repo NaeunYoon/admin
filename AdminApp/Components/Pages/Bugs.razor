@@ -84,8 +84,8 @@
 @if (editing != null)
 {
     var isNew = editing.Id == 0;
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="Cancel">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(isNew ? "버그 신고" : "버그 상세")</h5>
@@ -240,6 +240,7 @@
     }
 
     private void Cancel() { editing = null; formError = null; }
+    private void NoOp() { /* 모달 내부 클릭 propagation 차단 */ }
 
     private async Task Save()
     {

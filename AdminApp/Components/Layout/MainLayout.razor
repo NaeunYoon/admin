@@ -1,4 +1,7 @@
 ﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthProvider
+@inject AdminApp.Services.PageStatService PageStats
 
 <div class="page">
     <div class="sidebar">
@@ -21,3 +24,29 @@
     <a href="" class="reload">Reload</a>
     <a class="dismiss">🗙</a>
 </div>
+
+@* 푸시 알림 권한 안내 토스트 (로그인 상태에서만) *@
+<PushSubscribeButton />
+
+@code {
+    // 페이지 방문 통계 — 상호작용 렌더 첫 회 1번만 기록 (prerender 중복 방지)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var auth = await AuthProvider.GetAuthenticationStateAsync();
+            var u = auth.User;
+            if (u.Identity?.IsAuthenticated != true) return;
+            var role = u.IsInRole("Admin") ? "Admin"
+                     : u.IsInRole("Employee") ? "Employee"
+                     : u.IsInRole("Guest") ? "Guest" : null;
+            if (role == null) return;
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            var page = AdminApp.Services.PageStatService.MapPage(path);
+            if (!string.IsNullOrEmpty(page))
+                _ = PageStats.RecordAsync(role, page);
+        }
+        catch { /* 통계는 실패해도 무시 */ }
+    }
+}

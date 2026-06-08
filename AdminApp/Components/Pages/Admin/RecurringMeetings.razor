@@ -53,9 +53,11 @@
                                            checked="@m.IsActive" @onchange="(e) => ToggleActive(m, (bool)e.Value!)" />
                                 </div>
                             </td>
-                            <td class="text-nowrap">
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(m)">편집</button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(m)">삭제</button>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEdit(m)">편집</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(m)">삭제</button>
+                                </div>
                             </td>
                         </tr>
                     }
@@ -68,8 +70,8 @@
 @* ---------- 정기 회의 편집 모달 ---------- *@
 @if (editing != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="Cancel">
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(editing.Id == 0 ? "정기 회의 추가" : "정기 회의 편집")</h5>
@@ -213,6 +215,7 @@
     }
 
     private void Cancel() { editing = null; formError = null; }
+    private void NoOp() { }
 
     private async Task Save()
     {

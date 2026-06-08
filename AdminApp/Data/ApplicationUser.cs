@@ -138,6 +138,9 @@ public class ApplicationUser : IdentityUser
     /// <summary>인사관리용 메모</summary>
     public string? Notes { get; set; }
 
+    /// <summary>알림 받기 (앱+푸시) — false면 알림 자체를 받지 않음</summary>
+    public bool NotificationsEnabled { get; set; } = true;
+
     /// <summary>생성일자</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

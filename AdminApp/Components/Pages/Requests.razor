@@ -4,6 +4,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.PushNotificationService Push
 
 <PageTitle>연차/추가근무 상신</PageTitle>
 
@@ -29,7 +30,39 @@
                         </div>
                     </div>
 
-                    @* 포상휴가 사용 단위 선택 (포상휴가 선택 시에만 노출) *@
+                    @* 반차 시간대 (오전/오후) *@
+                    @if (leaveType == "반차")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">시간대</label>
+                            <div>
+                                @foreach (var pr in halfPeriods)
+                                {
+                                    <input type="radio" class="btn-check" name="lperiod" id="lp-@pr"
+                                           checked="@(leavePeriod == pr)" @onchange="() => leavePeriod = pr" autocomplete="off" />
+                                    <label class="btn btn-outline-info btn-sm me-1 mb-1" for="lp-@pr">@pr</label>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @* 반반차 시간대 (4교시 = 2시간 단위) *@
+                    @if (leaveType == "반반차")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">시간대 <small class="text-muted">(2시간 단위)</small></label>
+                            <div>
+                                @foreach (var pr in quarterPeriods)
+                                {
+                                    <input type="radio" class="btn-check" name="lperiod" id="lq-@pr.Value"
+                                           checked="@(leavePeriod == pr.Value)" @onchange="() => leavePeriod = pr.Value" autocomplete="off" />
+                                    <label class="btn btn-outline-info btn-sm me-1 mb-1" for="lq-@pr.Value">@pr.Label</label>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @* 포상휴가 사용 단위 + 시간대 선택 *@
                     @if (leaveType == "포상휴가")
                     {
                         <div class="mb-3">
@@ -42,7 +75,36 @@
                                     <label class="btn btn-outline-success btn-sm me-1 mb-1" for="ru-@u.Value">@u.Label</label>
                                 }
                             </div>
-                            <small class="text-muted">반일/반반일 선택 시엔 1일 안에서만 사용돼요.</small>
+
+                            @if (rewardUnit == 0.5m)
+                            {
+                                <div class="mt-2">
+                                    <label class="form-label">시간대</label>
+                                    <div>
+                                        @foreach (var pr in halfPeriods)
+                                        {
+                                            <input type="radio" class="btn-check" name="rperiod" id="rp-@pr"
+                                                   checked="@(leavePeriod == pr)" @onchange="() => leavePeriod = pr" autocomplete="off" />
+                                            <label class="btn btn-outline-info btn-sm me-1 mb-1" for="rp-@pr">@pr</label>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else if (rewardUnit == 0.25m)
+                            {
+                                <div class="mt-2">
+                                    <label class="form-label">시간대 <small class="text-muted">(2시간)</small></label>
+                                    <div>
+                                        @foreach (var pr in quarterPeriods)
+                                        {
+                                            <input type="radio" class="btn-check" name="rperiod" id="rq-@pr.Value"
+                                                   checked="@(leavePeriod == pr.Value)" @onchange="() => leavePeriod = pr.Value" autocomplete="off" />
+                                            <label class="btn btn-outline-info btn-sm me-1 mb-1" for="rq-@pr.Value">@pr.Label</label>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            <small class="text-muted d-block mt-1">전일 외 선택 시 1일 안에서만 사용돼요.</small>
                         </div>
                     }
 
@@ -194,6 +256,17 @@
     private readonly string[] leaveTypes = { "연차", "반차", "반반차", "병가", "포상휴가" };
     private string leaveType = "연차";
 
+    // 반차/반반차 시간대
+    private readonly string[] halfPeriods = { "오전", "오후" };
+    private readonly (string Value, string Label)[] quarterPeriods =
+    {
+        ("1교시", "1교시 (오전 전반)"),
+        ("2교시", "2교시 (오전 후반)"),
+        ("3교시", "3교시 (오후 전반)"),
+        ("4교시", "4교시 (오후 후반)"),
+    };
+    private string? leavePeriod;
+
     private readonly (decimal Value, string Label)[] rewardUnits =
     {
         (1m, "전일 (1일)"),
@@ -258,12 +331,21 @@
     private void OnLeaveTypeChanged(string t)
     {
         leaveType = t;
+        // 시간대 기본값 설정
+        leavePeriod = t switch
+        {
+            "반차" => "오전",
+            "반반차" => "1교시",
+            _ => null
+        };
         SyncEndDate();
     }
 
     private void OnRewardUnitChanged(decimal value)
     {
         rewardUnit = value;
+        // 사용 단위에 따라 시간대 기본값
+        leavePeriod = value == 0.5m ? "오전" : value == 0.25m ? "1교시" : null;
         SyncEndDate();
     }
 
@@ -285,6 +367,9 @@
             UserId = user.Id,
             UserName = user.KoreanName ?? user.Email,
             LeaveType = leaveType,
+            Period = (leaveType is "반차" or "반반차") ? leavePeriod
+                     : (leaveType == "포상휴가" && rewardUnit < 1m) ? leavePeriod
+                     : null,
             StartDate = startDate,
             EndDate = (leaveType is "반차" or "반반차") || (leaveType == "포상휴가" && rewardUnit < 1m) ? startDate : endDate,
             Reason = string.IsNullOrWhiteSpace(leaveReason) ? "개인사유" : leaveReason,
@@ -301,6 +386,14 @@
         leaveMsg = "휴가 상신이 접수되었습니다. (승인 대기)";
         leaveReason = "개인사유";
         reasonEditable = false;
+
+        // 관리자에게 알림 (인박스 + 푸시)
+        _ = Push.SendToAdminsAsync(
+            "새 휴가 신청",
+            $"{user.KoreanName ?? user.UserName} · {req.LeaveType} {req.StartDate:MM-dd}~{req.EndDate:MM-dd} ({Fmt.Day(req.Days)}일)",
+            "/admin/requests",
+            "휴가");
+
         await LoadHistory();
     }
 
@@ -328,6 +421,14 @@
         }
 
         rewardMsg = "추가근무 상신이 접수되었습니다. (승인 대기)";
+
+        // 관리자에게 알림 (인박스 + 푸시)
+        _ = Push.SendToAdminsAsync(
+            "새 추가근무 신청",
+            $"{user.KoreanName ?? user.UserName} · 포상 {Fmt.Day(rewardAmount)}일 (근무 {Fmt.Day(workHours)}시간)",
+            "/admin/requests",
+            "포상");
+
         workHours = 0;
         rewardAmount = 0;
         rewardReason = "";

@@ -1,0 +1,189 @@
+@page "/notifications"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+@using System.Security.Claims
+
+<PageTitle>알림함</PageTitle>
+
+<div class="container py-3" style="max-width: 880px;">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="fs-4 mb-0">알림함</h2>
+        @if (items != null && items.Any(n => !n.IsRead))
+        {
+            <button class="btn btn-sm btn-outline-secondary" @onclick="MarkAllRead">전체 읽음 처리</button>
+        }
+    </div>
+
+    @* 설정 카드 *@
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            <h6 class="mb-3">알림 설정</h6>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="notif-master"
+                       checked="@notifEnabled" @onchange="OnMasterToggle" />
+                <label class="form-check-label" for="notif-master">
+                    <strong>알림 받기</strong>
+                    <small class="text-muted d-block">
+                        @(notifEnabled ? "앱 내 알림함 및 푸시 알림을 받습니다." : "모든 알림을 받지 않습니다.")
+                    </small>
+                </label>
+            </div>
+            @if (!string.IsNullOrEmpty(savedMessage))
+            {
+                <small class="text-success d-block mt-2">@savedMessage</small>
+            }
+        </div>
+    </div>
+
+    @* 카테고리 필터 *@
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+        @foreach (var f in CategoryFilters)
+        {
+            var filter = f;
+            <button class="btn btn-sm @(categoryFilter == filter ? "btn-dark" : "btn-outline-secondary")"
+                    @onclick="() => categoryFilter = filter">
+                @filter @if (filter == "전체" && items != null && items.Count(n => !n.IsRead) > 0)
+                {
+                    <span class="badge bg-danger ms-1">@items.Count(n => !n.IsRead)</span>
+                }
+            </button>
+        }
+    </div>
+
+    @* 목록 *@
+    @if (items == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else if (!FilteredItems.Any())
+    {
+        <div class="alert alert-light border text-center py-5">
+            <div class="fs-1">🔔</div>
+            <p class="mb-0 text-muted">@(items.Count == 0 ? "받은 알림이 없습니다." : "해당 카테고리의 알림이 없습니다.")</p>
+        </div>
+    }
+    else
+    {
+        <ul class="list-group">
+            @foreach (var n in FilteredItems)
+            {
+                <li class="list-group-item d-flex justify-content-between align-items-start @(n.IsRead ? "" : "notif-unread")"
+                    style="cursor: pointer;" @onclick="() => OpenItem(n)">
+                    <div class="flex-grow-1 me-2" style="min-width:0;">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            @if (!n.IsRead)
+                            {
+                                <span class="badge bg-danger">N</span>
+                            }
+                            @if (!string.IsNullOrEmpty(n.Category))
+                            {
+                                <span class="badge bg-secondary">@n.Category</span>
+                            }
+                            <strong>@n.Title</strong>
+                        </div>
+                        <div class="small text-muted" style="white-space: pre-wrap;">@n.Body</div>
+                    </div>
+                    <small class="text-muted text-nowrap">@n.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                </li>
+            }
+        </ul>
+        <small class="text-muted d-block mt-2">최근 100건 표시</small>
+    }
+</div>
+
+<style>
+    .notif-unread { background-color: #fff8e1; border-left: 3px solid #f59e0b; }
+</style>
+
+@code {
+    private List<NotificationItem>? items;
+    private string? userId;
+    private bool notifEnabled = true;
+    private string categoryFilter = "전체";
+    private string? savedMessage;
+
+    private static readonly string[] CategoryFilters = { "전체", "휴가", "포상", "비품", "공지", "버그", "기타" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var user = await UserManager.GetUserAsync(auth.User);
+        notifEnabled = user?.NotificationsEnabled ?? true;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (userId == null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.NotificationItems.AsNoTracking()
+            .Where(n => n.UserId == userId)
+            .OrderByDescending(n => n.CreatedAt)
+            .Take(100)
+            .ToListAsync();
+    }
+
+    private IEnumerable<NotificationItem> FilteredItems => categoryFilter switch
+    {
+        "전체" => items ?? Enumerable.Empty<NotificationItem>(),
+        var c => (items ?? new()).Where(n => (n.Category ?? "기타") == c)
+    };
+
+    private async Task OpenItem(NotificationItem n)
+    {
+        // 읽음 처리
+        if (!n.IsRead)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var target = await db.NotificationItems.FindAsync(n.Id);
+            if (target != null)
+            {
+                target.IsRead = true;
+                target.ReadAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
+        }
+        // URL 있으면 이동
+        if (!string.IsNullOrEmpty(n.Url))
+        {
+            Nav.NavigateTo(n.Url);
+        }
+        else
+        {
+            await Load();
+        }
+    }
+
+    private async Task MarkAllRead()
+    {
+        if (userId == null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.NotificationItems
+            .Where(n => n.UserId == userId && !n.IsRead)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsRead, true)
+                .SetProperty(x => x.ReadAt, DateTime.UtcNow));
+        await Load();
+    }
+
+    private async Task OnMasterToggle(ChangeEventArgs e)
+    {
+        notifEnabled = (bool)(e.Value ?? true);
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(auth.User);
+        if (user != null)
+        {
+            user.NotificationsEnabled = notifEnabled;
+            user.UpdatedAt = DateTime.UtcNow;
+            await UserManager.UpdateAsync(user);
+            savedMessage = notifEnabled ? "✅ 알림이 켜졌어요." : "✅ 알림이 꺼졌어요.";
+        }
+    }
+}

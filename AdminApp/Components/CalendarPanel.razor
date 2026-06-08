@@ -49,26 +49,42 @@
 @* ---------- 사내 일정 모달 (조회: 전원 / 등록·삭제: 관리자) ---------- *@
 @if (selectedDate != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CloseDay">
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down modal-dialog-scrollable" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">사내 일정 — @selectedDate.Value.ToString("yyyy-MM-dd")</h5>
                     <button type="button" class="btn-close" @onclick="CloseDay"></button>
                 </div>
                 <div class="modal-body">
-                    @* ----- 이 날의 일정 (전원 조회) ----- *@
+                    @* ----- 이 날 휴가 현황 (관리자/직원만) ----- *@
+                    @{
+                        var dayLeaves = LeavesOn(selectedDate.Value).ToList();
+                    }
+                    @if (dayLeaves.Any())
+                    {
+                        <h6 class="text-muted small mb-2">이 날 휴가/병가</h6>
+                        <div class="mb-3">
+                            @foreach (var lv in dayLeaves)
+                            {
+                                <span class="badge me-1 mb-1 @LeaveClass(lv.LeaveType)">@lv.UserName · @lv.LeaveType</span>
+                            }
+                        </div>
+                    }
+
+                    @* ----- 이 날의 일정 ----- *@
+                    <h6 class="text-muted small mb-2">사내 일정</h6>
                     @if (dayEvents.Count == 0)
                     {
-                        <p class="text-muted mb-0">등록된 일정이 없습니다.</p>
+                        <p class="text-muted mb-3 small">등록된 일정이 없습니다.</p>
                     }
                     else
                     {
                         @foreach (var e in dayEvents)
                         {
                             <div class="border rounded p-2 mb-2">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
+                                <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                                    <div class="flex-grow-1" style="min-width:0;">
                                         <span class="fw-bold">🎉 @e.Title</span>
                                         <span class="badge bg-purple ms-1">@e.Category</span>
                                     </div>
@@ -79,7 +95,7 @@
                                 </div>
                                 @if (!string.IsNullOrWhiteSpace(e.Description))
                                 {
-                                    <div class="mt-1 small" style="white-space: pre-wrap;">@e.Description</div>
+                                    <div class="mt-2 small" style="white-space: pre-wrap; word-break: break-all;">@e.Description</div>
                                 }
                             </div>
                         }
@@ -192,17 +208,10 @@
             .Where(e => e.Date >= first && e.Date <= last)
             .ToListAsync();
 
-        // 게스트(협력사)는 직원 휴가 정보(개인정보) 볼 수 없음
-        if (isGuest)
-        {
-            leaves = new();
-        }
-        else
-        {
-            leaves = await db.LeaveRequests.AsNoTracking()
-                .Where(l => l.Status == "승인" && l.StartDate <= last && l.EndDate >= first)
-                .ToListAsync();
-        }
+        // 휴가/반차 정보는 협력사도 사내 일정 파악 위해 열람 가능
+        leaves = await db.LeaveRequests.AsNoTracking()
+            .Where(l => l.Status == "승인" && l.StartDate <= last && l.EndDate >= first)
+            .ToListAsync();
 
         BuildGrid();
     }
@@ -260,6 +269,8 @@
         selectedDate = null;
         eventEditing = null;
     }
+
+    private void NoOp() { }
 
     private async Task SaveEvent()
     {

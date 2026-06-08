@@ -4,18 +4,26 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
+@inject AdminApp.Services.PushNotificationService Push
 
 <PageTitle>신청 관리</PageTitle>
 
 <div class="container-fluid py-3">
     <h2 class="mb-3">신청 관리</h2>
 
-    <ul class="nav nav-tabs mb-3">
-        <li class="nav-item"><button class="nav-link @(tab == "leave" ? "active" : "")" @onclick='() => tab = "leave"'>휴가 (@leaves?.Count(l => l.Status == "대기") 대기)</button></li>
-        <li class="nav-item"><button class="nav-link @(tab == "reward" ? "active" : "")" @onclick='() => tab = "reward"'>포상 (@rewards?.Count(r => r.Status == "대기") 대기)</button></li>
-        <li class="nav-item"><button class="nav-link @(tab == "supply" ? "active" : "")" @onclick='() => tab = "supply"'>비품/간식 (@supplies?.Count(s => s.Status == "대기") 대기)</button></li>
-        <li class="nav-item"><button class="nav-link @(tab == "reverts" ? "active" : "")" @onclick='() => tab = "reverts"'>승인취소 내역 (@reverts?.Count)</button></li>
-    </ul>
+    <div class="tabs-scroll mb-3">
+        <ul class="nav nav-tabs flex-nowrap">
+            <li class="nav-item text-nowrap"><button class="nav-link @(tab == "leave" ? "active" : "")" @onclick='() => tab = "leave"'>휴가 (@leaves?.Count(l => l.Status == "대기"))</button></li>
+            <li class="nav-item text-nowrap"><button class="nav-link @(tab == "reward" ? "active" : "")" @onclick='() => tab = "reward"'>포상 (@rewards?.Count(r => r.Status == "대기"))</button></li>
+            <li class="nav-item text-nowrap"><button class="nav-link @(tab == "supply" ? "active" : "")" @onclick='() => tab = "supply"'>비품/간식 (@supplies?.Count(s => s.Status == "대기"))</button></li>
+            <li class="nav-item text-nowrap"><button class="nav-link @(tab == "reverts" ? "active" : "")" @onclick='() => tab = "reverts"'>승인취소 (@reverts?.Count)</button></li>
+        </ul>
+    </div>
+
+<style>
+    .tabs-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tabs-scroll .nav-tabs { border-bottom: 1px solid #dee2e6; min-width: max-content; }
+</style>
 
     @* ---------- 휴가 ---------- *@
     @if (tab == "leave")
@@ -43,19 +51,21 @@
                             <td>
                                 @if (l.Status == "대기")
                                 {
-                                    <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveLeave(l)">승인</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectLeave(l)">반려</button>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button class="btn btn-sm btn-success" @onclick="() => ApproveLeave(l)">승인</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectLeave(l)">반려</button>
+                                    </div>
                                 }
                                 else if (l.Status == "승인")
                                 {
-                                    <div class="d-flex flex-column gap-1">
-                                        <small class="text-muted">@l.ApprovedByName @l.ApprovedAt?.ToLocalTime().ToString("MM-dd HH:mm")</small>
-                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Leave", l.Id)'>↺ 승인취소</button>
+                                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                                        <small class="text-muted">@l.ApprovedByName</small>
+                                        <button class="btn btn-sm btn-outline-warning text-nowrap" @onclick='() => OpenRevert("Leave", l.Id)'>↺ 취소</button>
                                     </div>
                                 }
                                 else
                                 {
-                                    <small class="text-muted">@l.ApprovedByName @l.ApprovedAt?.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                                    <small class="text-muted">@l.ApprovedByName</small>
                                 }
                             </td>
                         </tr>
@@ -98,8 +108,10 @@
                             <td>
                                 @if (r.Status == "대기")
                                 {
-                                    <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveReward(r)">승인</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectReward(r)">반려</button>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button class="btn btn-sm btn-success" @onclick="() => ApproveReward(r)">승인</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectReward(r)">반려</button>
+                                    </div>
                                 }
                                 else if (r.Status == "승인")
                                 {
@@ -150,17 +162,19 @@
                             <td>
                                 @if (s.Status == "대기")
                                 {
-                                    <button class="btn btn-sm btn-success me-1" @onclick='() => SetSupplyStatus(s, "승인")'>승인</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick='() => SetSupplyStatus(s, "반려")'>반려</button>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button class="btn btn-sm btn-success" @onclick='() => SetSupplyStatus(s, "승인")'>승인</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick='() => SetSupplyStatus(s, "반려")'>반려</button>
+                                    </div>
                                 }
                                 else if (s.Status is "승인" or "완료")
                                 {
-                                    <div class="d-flex flex-column gap-1">
+                                    <div class="d-flex flex-wrap gap-1">
                                         @if (s.Status == "승인")
                                         {
-                                            <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료 처리</button>
+                                            <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료</button>
                                         }
-                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Supply", s.Id)'>↺ 승인취소</button>
+                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Supply", s.Id)'>↺ 취소</button>
                                     </div>
                                 }
                                 else
@@ -217,8 +231,8 @@
 @* ---------- 승인취소 확인 모달 ---------- *@
 @if (revertingTarget != null)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick="CancelRevert">
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title text-warning">↺ 승인취소</h5>
@@ -257,8 +271,8 @@
 @* ---------- 관리자 포상 부여 모달 ---------- *@
 @if (granting)
 {
-    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" @onclick='() => granting = false'>
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">관리자 포상 부여</h5>
@@ -385,6 +399,8 @@
         revertReason = "";
         revertError = null;
     }
+
+    private void NoOp() { /* 모달 내부 클릭 propagation 차단 */ }
 
     private async Task ConfirmRevert()
     {
@@ -527,12 +543,21 @@
             target.ApprovedByName = adminName;
             target.ApprovedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+
+            // 신청자에게 푸시
+            _ = Push.SendToUserAsync(target.UserId,
+                "휴가 신청 승인됨",
+                $"{target.LeaveType} {target.StartDate:MM-dd}~{target.EndDate:MM-dd} ({Fmt.Day(target.Days)}일) 승인 완료",
+                "/requests",
+                "휴가");
         }
         await LoadAll();
     }
 
     private async Task RejectLeave(LeaveRequest l)
     {
+        string? notifyUserId = null;
+        string notifyBody = "";
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
             var target = await db.LeaveRequests.FindAsync(l.Id);
@@ -542,7 +567,11 @@
             target.ApprovedByName = adminName;
             target.ApprovedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+            notifyUserId = target.UserId;
+            notifyBody = $"{target.LeaveType} {target.StartDate:MM-dd}~{target.EndDate:MM-dd} 신청이 반려되었습니다";
         }
+        if (!string.IsNullOrEmpty(notifyUserId))
+            _ = Push.SendToUserAsync(notifyUserId, "휴가 신청 반려됨", notifyBody, "/requests", "휴가");
         await LoadAll();
     }
 
@@ -566,12 +595,21 @@
             target.ApprovedByName = adminName;
             target.ApprovedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+
+            // 신청자에게 푸시
+            _ = Push.SendToUserAsync(target.UserId,
+                "포상 신청 승인됨",
+                $"포상 {Fmt.Day(target.Amount)}일 ({target.Source}) 승인 완료",
+                "/requests",
+                "포상");
         }
         await LoadAll();
     }
 
     private async Task RejectReward(RewardRecord r)
     {
+        string? notifyUserId = null;
+        string notifyBody = "";
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
             var target = await db.RewardRecords.FindAsync(r.Id);
@@ -581,7 +619,11 @@
             target.ApprovedByName = adminName;
             target.ApprovedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+            notifyUserId = target.UserId;
+            notifyBody = $"포상 {Fmt.Day(target.Amount)}일 신청이 반려되었습니다";
         }
+        if (!string.IsNullOrEmpty(notifyUserId))
+            _ = Push.SendToUserAsync(notifyUserId, "포상 신청 반려됨", notifyBody, "/requests", "포상");
         await LoadAll();
     }
 

@@ -1,0 +1,197 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<div class="d-flex flex-wrap justify-content-end align-items-center mb-3 gap-2">
+    <div class="btn-group btn-group-sm">
+        <button class="btn @(viewMode == "week" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => SetView("week")'>주간</button>
+        <button class="btn @(viewMode == "month" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => SetView("month")'>월간</button>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" @onclick="Prev">◀</button>
+    <strong>@RangeLabel</strong>
+    <button class="btn btn-outline-secondary btn-sm" @onclick="Next">▶</button>
+</div>
+
+<div class="d-flex gap-2 mb-3 flex-wrap small">
+    <span class="badge" style="background-color:#86efac; color:#000;">8시 출근</span>
+    <span class="badge" style="background-color:#93c5fd; color:#000;">9시 출근</span>
+    <span class="badge" style="background-color:#fdba74; color:#000;">10시 출근</span>
+    <span class="badge bg-white text-danger border border-danger">🔴 지각</span>
+    <span class="text-muted">· 셀 = 계획 출근~퇴근 · 빨간 테두리 = 실제 지각</span>
+</div>
+
+@if (loading)
+{
+    <p>로딩 중...</p>
+}
+else if (employees.Count == 0)
+{
+    <p class="text-muted">직원이 없습니다.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle text-center sched-table mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="text-start sticky-col">직원</th>
+                    @foreach (var d in days)
+                    {
+                        var isToday = d == today;
+                        <th class="@(isToday ? "today-col" : "")">
+                            <div>@d.ToString("M/d")</div>
+                            <small class="text-muted">@WeekdayKo(d.DayOfWeek)</small>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var emp in employees)
+                {
+                    <tr>
+                        <td class="text-start sticky-col"><strong>@(emp.KoreanName ?? emp.UserName)</strong></td>
+                        @foreach (var d in days)
+                        {
+                            var key = (emp.Id, d);
+                            var planned = scheduleMap.TryGetValue(key, out var s) ? (TimeOnly?)s.StartTime : null;
+                            var empDefault = emp.ScheduledStartTime ?? DefaultStart;
+                            var plannedStart = planned ?? empDefault;
+                            var plannedEnd = scheduleMap.TryGetValue(key, out var s2) ? s2.EndTime : empDefault.AddHours(9);
+                            var late = IsLateCell(emp.Id, d, plannedStart);
+                            <td style="background-color:@StartColor(plannedStart.Hour);"
+                                class="@(late ? "late-cell" : "")">
+                                <div class="fw-bold">@plannedStart.ToString("HH:mm")</div>
+                                <small class="text-muted">~@plannedEnd.ToString("HH:mm")</small>
+                                @if (late)
+                                {
+                                    <div class="late-tag">지각</div>
+                                }
+                                else if (planned == null)
+                                {
+                                    <div style="font-size:0.65rem; color:#aaa;">기본</div>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <small class="text-muted d-block mt-2">'기본' = 미설정(개인정보 출근예정시각 기준) · 색상은 출근 시간대 · 평일만 표시</small>
+}
+
+<style>
+    .sched-table th, .sched-table td { min-width: 60px; font-size: 0.85rem; padding: 4px; }
+    .sched-table .sticky-col { position: sticky; left: 0; background: #fff; z-index: 1; min-width: 90px; }
+    .sched-table thead .sticky-col { background: #f8f9fa; }
+    .sched-table .today-col { background: #e7f1ff; }
+    .sched-table .late-cell { outline: 2px solid #dc3545; outline-offset: -2px; }
+    .sched-table .late-tag { font-size: 0.65rem; font-weight: 700; color: #dc3545; }
+</style>
+
+@code {
+    private string viewMode = "week";
+    private DateOnly anchor;
+    private DateOnly today;
+    private List<DateOnly> days = new();
+    private List<ApplicationUser> employees = new();
+    private Dictionary<(string, DateOnly), WorkSchedule> scheduleMap = new();
+    private Dictionary<(string, DateOnly), TimeOnly> attendanceMap = new();
+    private bool loading = true;
+
+    private static readonly TimeOnly DefaultStart = new(10, 0);
+
+    private bool IsLateCell(string userId, DateOnly date, TimeOnly plannedStart) =>
+        attendanceMap.TryGetValue((userId, date), out var checkIn) && checkIn > plannedStart;
+
+    private string RangeLabel => viewMode == "week"
+        ? $"{days.FirstOrDefault():M/d} ~ {days.LastOrDefault():M/d}"
+        : anchor.ToString("yyyy년 M월");
+
+    protected override async Task OnInitializedAsync()
+    {
+        today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9));
+        anchor = MondayOf(today);
+        await Load();
+    }
+
+    private static DateOnly MondayOf(DateOnly d)
+    {
+        int dow = (int)d.DayOfWeek;
+        int offset = dow == 0 ? 6 : dow - 1;
+        return d.AddDays(-offset);
+    }
+
+    private void BuildDays()
+    {
+        days.Clear();
+        if (viewMode == "week")
+        {
+            for (int i = 0; i < 5; i++) days.Add(anchor.AddDays(i));
+        }
+        else
+        {
+            var first = new DateOnly(anchor.Year, anchor.Month, 1);
+            var last = first.AddMonths(1).AddDays(-1);
+            for (var d = first; d <= last; d = d.AddDays(1))
+                if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday)
+                    days.Add(d);
+        }
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        BuildDays();
+        var emps = await UserManager.GetUsersInRoleAsync("Employee");
+        var admins = await UserManager.GetUsersInRoleAsync("Admin");
+        employees = emps.Concat(admins).GroupBy(u => u.Id).Select(g => g.First())
+            .OrderBy(u => u.KoreanName).ToList();
+
+        var first = days.First();
+        var last = days.Last();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var scheds = await db.WorkSchedules.AsNoTracking()
+            .Where(w => w.Date >= first && w.Date <= last)
+            .ToListAsync();
+        scheduleMap = scheds.ToDictionary(s => (s.UserId, s.Date), s => s);
+
+        var recs = await db.AttendanceRecords.AsNoTracking()
+            .Where(r => r.WorkDate >= first && r.WorkDate <= last && r.CheckIn != null && r.UserId != null)
+            .ToListAsync();
+        attendanceMap = recs
+            .GroupBy(r => (r.UserId!, r.WorkDate))
+            .ToDictionary(g => g.Key, g => g.First().CheckIn!.Value);
+        loading = false;
+    }
+
+    private void SetView(string mode)
+    {
+        viewMode = mode;
+        anchor = mode == "week" ? MondayOf(today) : new DateOnly(today.Year, today.Month, 1);
+        _ = Load();
+    }
+
+    private async Task Prev()
+    {
+        anchor = viewMode == "week" ? anchor.AddDays(-7) : anchor.AddMonths(-1);
+        await Load();
+    }
+    private async Task Next()
+    {
+        anchor = viewMode == "week" ? anchor.AddDays(7) : anchor.AddMonths(1);
+        await Load();
+    }
+
+    private static string StartColor(int start) => start switch
+    {
+        8 => "#86efac", 9 => "#93c5fd", 10 => "#fdba74", _ => "#e5e7eb"
+    };
+
+    private static string WeekdayKo(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday => "월", DayOfWeek.Tuesday => "화", DayOfWeek.Wednesday => "수",
+        DayOfWeek.Thursday => "목", DayOfWeek.Friday => "금", _ => "?"
+    };
+}

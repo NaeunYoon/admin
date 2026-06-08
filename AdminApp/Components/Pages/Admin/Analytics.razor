@@ -1,0 +1,116 @@
+@page "/admin/analytics"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@using Microsoft.EntityFrameworkCore
+@using AdminApp.Data
+
+<PageTitle>사용 통계</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h2 class="fs-4 mb-0">페이지 사용 통계</h2>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="Load">🔄 새로고침</button>
+    </div>
+    <small class="text-muted d-block mb-3">각 권한(직원·관리자·게스트)이 어떤 페이지를 얼마나 사용하는지 실시간 집계입니다.</small>
+
+    @if (stats == null)
+    {
+        <p>로딩 중...</p>
+    }
+    else if (stats.Count == 0)
+    {
+        <div class="alert alert-light border text-center py-4">
+            <div class="fs-1">📊</div>
+            <p class="mb-0 text-muted">아직 집계된 방문이 없습니다.</p>
+        </div>
+    }
+    else
+    {
+        var rows = Ranked();
+        var max = rows.Count > 0 ? rows.Max(x => x.Count) : 1;
+
+        @* 역할 필터 *@
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            @foreach (var r in roleFilters)
+            {
+                var rf = r;
+                <button class="btn btn-sm @(roleFilter == rf.Value ? "btn-dark" : "btn-outline-secondary")"
+                        @onclick="() => roleFilter = rf.Value">
+                    @rf.Label <span class="badge bg-light text-dark border ms-1">@TotalFor(rf.Value)</span>
+                </button>
+            }
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <table class="table align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th style="width:40px;">#</th><th>페이지</th><th style="width:50%;">사용 빈도</th><th class="text-end">횟수</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (row, idx) in rows.Select((r, i) => (r, i)))
+                        {
+                            var pct = max > 0 ? (int)Math.Round(row.Count * 100.0 / max) : 0;
+                            <tr>
+                                <td class="text-muted">@(idx + 1)</td>
+                                <td>@row.Page</td>
+                                <td>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width:@(pct)%; background-color:@BarColor(row.Page);"></div>
+                                    </div>
+                                </td>
+                                <td class="text-end fw-bold">@row.Count</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <small class="text-muted d-block mt-2">
+            마지막 집계: @(stats.Count > 0 ? stats.Max(s => s.LastVisitUtc).ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-")
+        </small>
+    }
+</div>
+
+<style>
+    .bar-track { background:#eef0f2; border-radius:6px; height:20px; overflow:hidden; }
+    .bar-fill { height:100%; border-radius:6px; transition: width .3s; min-width:2px; }
+</style>
+
+@code {
+    private List<PageStat>? stats;
+    private string roleFilter = "All";
+    private readonly (string Value, string Label)[] roleFilters =
+    {
+        ("All", "전체"), ("Employee", "직원"), ("Admin", "관리자"), ("Guest", "게스트"),
+    };
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        stats = await db.PageStats.AsNoTracking().ToListAsync();
+    }
+
+    private int TotalFor(string role) =>
+        role == "All"
+            ? (stats?.Sum(s => s.Count) ?? 0)
+            : (stats?.Where(s => s.Role == role).Sum(s => s.Count) ?? 0);
+
+    private List<(string Page, int Count)> Ranked()
+    {
+        var src = stats ?? new();
+        var filtered = roleFilter == "All" ? src : src.Where(s => s.Role == roleFilter);
+        return filtered
+            .GroupBy(s => s.Page)
+            .Select(g => (Page: g.Key, Count: g.Sum(x => x.Count)))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+    }
+
+    private static string BarColor(string page) =>
+        page.StartsWith("[관리]") ? "#c88aab" : "#5fa8d3";
+}
