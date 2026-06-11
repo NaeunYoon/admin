@@ -2,6 +2,59 @@ html, body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
+/* ============ 모바일 반응형 공통 유틸 ============ */
+@media (max-width: 768px) {
+    /* 표 → 카드 변환 (.mcard 클래스를 table에, 각 td에 data-label="라벨") */
+    .mcard thead { display: none; }
+    .mcard tbody tr {
+        display: block;
+        border: 1px solid #e3e6ea;
+        border-radius: 12px;
+        padding: 10px 14px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        background: #fff;
+    }
+    .mcard tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 5px 0;
+        border: none !important;
+        text-align: right;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        min-width: 0;
+        font-size: 0.9rem;
+    }
+    .mcard tbody td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: #6c757d;
+        text-align: left;
+        flex-shrink: 0;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+    .mcard tbody td > * { min-width: 0; }
+    .mcard tbody td[colspan]::before { content: ""; }
+    .mcard tbody td[colspan] { justify-content: center; text-align: center; }
+    /* 카드 헤더로 강조할 첫 칸 */
+    .mcard tbody td.mcard-head {
+        border-bottom: 1px solid #f0f0f0 !important;
+        padding-bottom: 8px; margin-bottom: 4px; font-size: 1.05rem; align-items: center;
+    }
+    /* 카드 모드일 때 가로 스크롤 끄기 (table-responsive 옆에 .mcard-wrap) */
+    .mcard-wrap { overflow-x: visible !important; }
+
+    /* 버튼/필터 균등 그리드 */
+    .mgrid-3, .mgrid-4 { display: grid !important; gap: 6px; }
+    .mgrid-3 { grid-template-columns: repeat(3, 1fr); }
+    .mgrid-4 { grid-template-columns: repeat(4, 1fr); }
+    .mgrid-3 > *, .mgrid-4 > * { width: 100%; }
+}
+
 a, .btn-link {
     color: #006bb7;
 }

@@ -23,18 +23,16 @@
     }
     else
     {
-        @* 주차 선택 버튼 (근무시간 설정용) *@
-        <div class="d-flex gap-1 mb-2 flex-wrap align-items-center">
-            <span class="text-muted small me-1">근무시간 주차:</span>
-            @for (int w = 1; w <= WeekCount; w++)
-            {
-                var wk = w;
-                var (wf, wl) = WeekRange(wk);
-                <button class="btn btn-sm @(selectedWeek == wk ? "btn-dark" : "btn-outline-secondary")"
-                        @onclick="() => selectedWeek = wk">
-                    @(wk)주차 <small>(@(wf.Day)~@(wl.Day)일)</small>
-                </button>
-            }
+        @* 주차 선택 (근무시간 설정용) *@
+        <div class="d-flex gap-2 mb-2 align-items-center">
+            <span class="text-muted small text-nowrap">근무시간 주차:</span>
+            <select class="form-select form-select-sm" style="max-width: 220px;" @bind="selectedWeek">
+                @for (int w = 1; w <= WeekCount; w++)
+                {
+                    var (wf, wl) = WeekRange(w);
+                    <option value="@w">@(w)주차 (@(wf.Day)~@(wl.Day)일)</option>
+                }
+            </select>
         </div>
 
         @* 유연 근무시간 설정 (선택한 달·주차) *@
@@ -68,8 +66,8 @@
             </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
+        <div class="table-responsive mcard-wrap">
+            <table class="table table-sm table-hover align-middle mcard">
                 <thead class="table-light">
                     <tr><th>날짜</th><th>계획 출근</th><th>실제 출근</th><th>퇴근</th><th>근무시간</th><th>상태</th></tr>
                 </thead>
@@ -84,12 +82,12 @@
                         {
                             var lateMin = r.CheckIn.HasValue ? (int)(r.CheckIn.Value - PlannedStart(r.WorkDate)).TotalMinutes : 0;
                             <tr class="@(IsLate(r) ? "table-danger" : "")">
-                                <td>@r.WorkDate.ToString("MM-dd (ddd)")</td>
-                                <td><small class="text-muted">@PlannedStart(r.WorkDate).ToString("HH:mm")</small></td>
-                                <td>@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
-                                <td>@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
-                                <td>@r.WorkDisplay</td>
-                                <td>
+                                <td data-label="날짜" class="mcard-head">@r.WorkDate.ToString("MM-dd (ddd)")</td>
+                                <td data-label="계획 출근"><small class="text-muted">@PlannedStart(r.WorkDate).ToString("HH:mm")</small></td>
+                                <td data-label="실제 출근">@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
+                                <td data-label="퇴근">@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
+                                <td data-label="근무시간">@r.WorkDisplay</td>
+                                <td data-label="상태">
                                     @if (IsLate(r))
                                     {
                                         <span class="badge bg-danger">지각 @(lateMin)분</span>

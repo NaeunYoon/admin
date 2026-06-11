@@ -23,6 +23,61 @@
 <style>
     .tabs-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .tabs-scroll .nav-tabs { border-bottom: 1px solid #dee2e6; min-width: max-content; }
+
+    /* 모바일: 신청 관리 표를 카드 형태로 (가로 스크롤 없이 화면 너비에 맞춤) */
+    @@media (max-width: 768px) {
+        .req-scroll { overflow-x: visible !important; }
+        .req-table { border: none; width: 100%; min-width: 0; }
+        .req-table thead { display: none; }
+        .req-table tbody tr {
+            display: block;
+            border: 1px solid #e3e6ea;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            background: #fff;
+        }
+        .req-table tbody td {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 5px 0;
+            border: none;
+            text-align: right;
+            font-size: 0.9rem;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .req-table tbody td::before {
+            content: attr(data-label);
+            font-weight: 600;
+            color: #6c757d;
+            text-align: left;
+            flex-shrink: 0;
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+        /* 값 영역이 줄바꿈되도록 */
+        .req-table tbody td > * { min-width: 0; }
+        /* 신청자/대상자 행은 카드 헤더처럼 강조 */
+        .req-table tbody td[data-label="신청자"],
+        .req-table tbody td[data-label="대상자"] {
+            border-bottom: 1px solid #f0f0f0;
+            padding-bottom: 8px;
+            margin-bottom: 4px;
+            font-size: 1.05rem;
+            align-items: center;
+        }
+        /* 처리 버튼 행은 오른쪽 정렬 */
+        .req-table tbody td[data-label="처리"] { padding-top: 8px; justify-content: flex-end; }
+        .req-table tbody td[data-label="처리"]::before { align-self: center; }
+        /* "항목 없음" 행은 라벨 숨김 */
+        .req-table tbody td[colspan]::before { content: ""; }
+        .req-table tbody td[colspan] { justify-content: center; text-align: center; }
+    }
 </style>
 
     @* ---------- 휴가 ---------- *@
@@ -32,8 +87,8 @@
             <input class="form-check-input" type="checkbox" id="pendL" @bind="showPendingOnly" />
             <label class="form-check-label" for="pendL">대기 항목만 보기</label>
         </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
+        <div class="table-responsive req-scroll">
+            <table class="table table-hover align-middle req-table">
                 <thead class="table-light">
                     <tr><th>신청자</th><th>종류</th><th>시작일 ▲</th><th>종료일</th><th>일수</th><th>사유</th><th>상태</th><th>처리</th></tr>
                 </thead>
@@ -41,14 +96,14 @@
                     @foreach (var l in FilteredLeaves)
                     {
                         <tr>
-                            <td>@l.UserName</td>
-                            <td>@l.LeaveType</td>
-                            <td>@l.StartDate.ToString("yyyy-MM-dd")</td>
-                            <td>@l.EndDate.ToString("yyyy-MM-dd")</td>
-                            <td>@Fmt.Day(l.Days)</td>
-                            <td><small>@l.Reason</small></td>
-                            <td>@StatusBadge(l.Status)</td>
-                            <td>
+                            <td data-label="신청자"><strong>@l.UserName</strong></td>
+                            <td data-label="종류">@l.LeaveType@(string.IsNullOrEmpty(l.Period) ? "" : $" ({l.Period})")</td>
+                            <td data-label="시작일">@l.StartDate.ToString("yyyy-MM-dd")</td>
+                            <td data-label="종료일">@l.EndDate.ToString("yyyy-MM-dd")</td>
+                            <td data-label="일수">@Fmt.Day(l.Days)</td>
+                            <td data-label="사유"><small>@l.Reason</small></td>
+                            <td data-label="상태">@StatusBadge(l.Status)</td>
+                            <td data-label="처리">
                                 @if (l.Status == "대기")
                                 {
                                     <div class="d-flex flex-wrap gap-1">
@@ -89,8 +144,8 @@
             </div>
             <button class="btn btn-sm btn-success" @onclick="OpenGrant">+ 관리자 포상 부여</button>
         </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
+        <div class="table-responsive req-scroll">
+            <table class="table table-hover align-middle req-table">
                 <thead class="table-light">
                     <tr><th>신청일 ▲</th><th>대상자</th><th>포상 일수</th><th>근무시간</th><th>사유</th><th>구분</th><th>상태</th><th>처리</th></tr>
                 </thead>
@@ -98,14 +153,14 @@
                     @foreach (var r in FilteredRewards)
                     {
                         <tr>
-                            <td><small>@r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
-                            <td>@r.UserName</td>
-                            <td>@Fmt.Day(r.Amount)</td>
-                            <td>@Fmt.Day(r.WorkHours)</td>
-                            <td><small>@r.Reason</small></td>
-                            <td><small>@r.Source</small></td>
-                            <td>@StatusBadge(r.Status)</td>
-                            <td>
+                            <td data-label="신청일"><small>@r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
+                            <td data-label="대상자"><strong>@r.UserName</strong></td>
+                            <td data-label="포상 일수">@Fmt.Day(r.Amount)</td>
+                            <td data-label="근무시간">@Fmt.Day(r.WorkHours)</td>
+                            <td data-label="사유"><small>@r.Reason</small></td>
+                            <td data-label="구분"><small>@r.Source</small></td>
+                            <td data-label="상태">@StatusBadge(r.Status)</td>
+                            <td data-label="처리">
                                 @if (r.Status == "대기")
                                 {
                                     <div class="d-flex flex-wrap gap-1">
@@ -143,8 +198,8 @@
             <input class="form-check-input" type="checkbox" id="pendS" @bind="showPendingOnly" />
             <label class="form-check-label" for="pendS">대기 항목만 보기</label>
         </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
+        <div class="table-responsive req-scroll">
+            <table class="table table-hover align-middle req-table">
                 <thead class="table-light">
                     <tr><th>신청일 ▲</th><th>신청자</th><th>분류</th><th>품목</th><th>수량</th><th>메모</th><th>상태</th><th>처리</th></tr>
                 </thead>
@@ -152,35 +207,28 @@
                     @foreach (var s in FilteredSupplies)
                     {
                         <tr>
-                            <td><small>@s.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
-                            <td>@s.UserName</td>
-                            <td>@s.Category</td>
-                            <td>@s.ItemName</td>
-                            <td>@s.Quantity</td>
-                            <td><small>@s.Note</small></td>
-                            <td>@StatusBadge(s.Status)</td>
-                            <td>
-                                @if (s.Status == "대기")
-                                {
-                                    <div class="d-flex flex-wrap gap-1">
+                            <td data-label="신청일"><small>@s.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
+                            <td data-label="신청자"><strong>@s.UserName</strong></td>
+                            <td data-label="분류">@s.Category</td>
+                            <td data-label="품목">@s.ItemName</td>
+                            <td data-label="수량">@s.Quantity</td>
+                            <td data-label="메모"><small>@s.Note</small></td>
+                            <td data-label="상태">@StatusBadge(s.Status)</td>
+                            <td data-label="처리">
+                                <div class="d-flex flex-wrap gap-1">
+                                    @if (s.Status == "대기")
+                                    {
                                         <button class="btn btn-sm btn-success" @onclick='() => SetSupplyStatus(s, "승인")'>승인</button>
                                         <button class="btn btn-sm btn-outline-danger" @onclick='() => SetSupplyStatus(s, "반려")'>반려</button>
-                                    </div>
-                                }
-                                else if (s.Status is "승인" or "완료")
-                                {
-                                    <div class="d-flex flex-wrap gap-1">
-                                        @if (s.Status == "승인")
-                                        {
-                                            <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료</button>
-                                        }
+                                    }
+                                    else if (s.Status == "승인")
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary" @onclick='() => SetSupplyStatus(s, "완료")'>완료</button>
                                         <button class="btn btn-sm btn-outline-warning" @onclick='() => OpenRevert("Supply", s.Id)'>↺ 취소</button>
-                                    </div>
-                                }
-                                else
-                                {
-                                    <small class="text-muted">-</small>
-                                }
+                                    }
+                                    @* 관리자는 어떤 상태든 영구 삭제 가능 *@
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => DeleteSupply(s)">🗑</button>
+                                </div>
                             </td>
                         </tr>
                     }
@@ -196,8 +244,8 @@
     @* ---------- 승인취소 내역 탭 ---------- *@
     @if (tab == "reverts")
     {
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
+        <div class="table-responsive req-scroll">
+            <table class="table table-sm table-hover align-middle req-table">
                 <thead class="table-light">
                     <tr><th>취소 시각</th><th>구분</th><th>대상자</th><th>분류</th><th>복원량</th><th>요약</th><th>사유</th><th>처리자</th></tr>
                 </thead>
@@ -211,14 +259,14 @@
                         @foreach (var rv in reverts)
                         {
                             <tr>
-                                <td><small>@rv.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
-                                <td><span class="badge bg-secondary">@RevertTypeLabel(rv.RequestType)</span></td>
-                                <td>@rv.UserName</td>
-                                <td><small>@(rv.Category ?? "-")</small></td>
-                                <td>@(rv.Amount.HasValue ? $"+{Fmt.Day(rv.Amount.Value)} 복원" : "-")</td>
-                                <td><small>@rv.Summary</small></td>
-                                <td><small>@rv.Reason</small></td>
-                                <td><small>@rv.RevertedByName</small></td>
+                                <td data-label="대상자"><strong>@rv.UserName</strong></td>
+                                <td data-label="구분"><span class="badge bg-secondary">@RevertTypeLabel(rv.RequestType)</span></td>
+                                <td data-label="분류"><small>@(rv.Category ?? "-")</small></td>
+                                <td data-label="복원량">@(rv.Amount.HasValue ? $"+{Fmt.Day(rv.Amount.Value)} 복원" : "-")</td>
+                                <td data-label="요약"><small>@rv.Summary</small></td>
+                                <td data-label="사유"><small>@rv.Reason</small></td>
+                                <td data-label="처리자"><small>@rv.RevertedByName</small></td>
+                                <td data-label="취소 시각"><small>@rv.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></td>
                             </tr>
                         }
                     }
@@ -635,6 +683,16 @@
             if (target == null) return;
             target.Status = status;
             await db.SaveChangesAsync();
+        }
+        await LoadAll();
+    }
+
+    // 관리자: 비품/간식 신청 영구 삭제 (목록 정리용)
+    private async Task DeleteSupply(SupplyRequest s)
+    {
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            await db.SupplyRequests.Where(x => x.Id == s.Id).ExecuteDeleteAsync();
         }
         await LoadAll();
     }

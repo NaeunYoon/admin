@@ -6,7 +6,7 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
             <h5 class="mb-0 fs-5">근무시간 설정 <small class="text-muted">(@(Week)주차)</small></h5>
-            <small class="text-muted">변경은 <strong>전날까지</strong>만 가능 · 당일·지난 날은 잠금 · 미설정 시 출근예정시각</small>
+            <small class="text-muted">변경은 <strong>전날 저녁 6시(18:00)까지</strong>만 가능 · 이후 잠금 · 미설정 시 출근예정시각</small>
         </div>
 
         @if (loaded)
@@ -22,7 +22,7 @@
                             var day = d;
                             var p = plan.TryGetValue(day, out var pp) ? pp : (Start: defaultStart, End: defaultEnd);
                             var fullLeave = IsFullDayLeave(day);
-                            var editable = day > today && !fullLeave;
+                            var editable = CanEdit(day) && !fullLeave;
                             var leaveLbl = LeaveLabel(day);
                             <tr style="background-color:@(fullLeave ? "#f1f1f1" : StartColor(p.Start));">
                                 <td>
@@ -102,6 +102,10 @@
     private string? userId;
     private string? userName;
     private DateOnly today;
+    private DateTime nowKst;
+
+    // 날짜 D의 근무시간은 전날(D-1) 저녁 6시(18:00)까지만 변경 가능
+    private bool CanEdit(DateOnly d) => nowKst < d.AddDays(-1).ToDateTime(new TimeOnly(18, 0));
     private List<DateOnly> weekdays = new();
     private Dictionary<DateOnly, (TimeOnly Start, TimeOnly End)> plan = new();
     private Dictionary<DateOnly, AttendanceRecord> actuals = new();
@@ -140,7 +144,8 @@
         var de = defaultStart.AddHours(9);
         defaultEnd = de > MaxEnd ? MaxEnd : de;
 
-        today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(9)); // KST
+        nowKst = DateTime.UtcNow.AddHours(9); // KST
+        today = DateOnly.FromDateTime(nowKst);
         // 선택한 달·주차의 평일만
         var (first, last) = WeekRangeFor(Month, Week);
         weekdays = Enumerable.Range(0, (last.DayNumber - first.DayNumber) + 1)
@@ -193,7 +198,7 @@
 
     private async Task OnChangeStart(DateOnly date, string value)
     {
-        if (date <= today || !TimeOnly.TryParse(value, out var st)) return;
+        if (!CanEdit(date) || !TimeOnly.TryParse(value, out var st)) return;
         // 출근 변경 시 퇴근 = 출근 + 9시간 (8h 근무 + 1h 점심). 19:30 넘으면 19:30으로 조정.
         var end = st.AddHours(9);
         if (end > MaxEnd) end = MaxEnd;
@@ -204,7 +209,7 @@
 
     private async Task OnChangeEnd(DateOnly date, string value)
     {
-        if (date <= today || !TimeOnly.TryParse(value, out var et)) return;
+        if (!CanEdit(date) || !TimeOnly.TryParse(value, out var et)) return;
         var start = plan.TryGetValue(date, out var pp) ? pp.Start : defaultStart;
         if (et <= start) return;
         plan[date] = (start, et);

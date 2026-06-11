@@ -29,8 +29,8 @@
     }
     else
     {
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
+        <div class="table-responsive mcard-wrap">
+            <table class="table table-hover align-middle mcard">
                 <thead class="table-light">
                     <tr>
                         <th class="d-none d-md-table-cell">사번</th>
@@ -52,35 +52,35 @@
                     @foreach (var u in FilteredUsers)
                     {
                         <tr>
-                            <td class="d-none d-md-table-cell"><small>@(u.EmployeeNumber ?? "-")</small></td>
-                            <td>
+                            <td data-label="사번"><small>@(u.EmployeeNumber ?? "-")</small></td>
+                            <td data-label="이름" class="mcard-head">
                                 <strong>@(u.KoreanName ?? "-")</strong>
                                 @if (!string.IsNullOrEmpty(u.EnglishName))
                                 {
                                     <small class="text-muted d-block">@u.EnglishName</small>
                                 }
                             </td>
-                            <td class="d-none d-lg-table-cell"><small class="text-muted">@u.Email</small></td>
-                            <td class="d-none d-md-table-cell">
-                                <div>@(u.Department ?? "-")</div>
-                                <small class="text-muted">@(u.Rank ?? u.Position ?? "-")</small>
+                            <td data-label="이메일" class="d-none d-lg-table-cell"><small class="text-muted">@u.Email</small></td>
+                            <td data-label="부서/직급">
+                                <span>@(u.Department ?? "-")</span>
+                                <small class="text-muted"> / @(u.Rank ?? u.Position ?? "-")</small>
                             </td>
-                            <td class="d-none d-xl-table-cell"><small>@(u.EmploymentType ?? "-")</small></td>
-                            <td class="d-none d-lg-table-cell">@(u.HireDate?.ToString("yyyy-MM-dd") ?? "-")</td>
-                            <td class="d-none d-xl-table-cell">@(u.YearsOfService?.ToString() ?? "-")</td>
-                            <td>
+                            <td data-label="고용형태" class="d-none d-xl-table-cell"><small>@(u.EmploymentType ?? "-")</small></td>
+                            <td data-label="입사일" class="d-none d-lg-table-cell">@(u.HireDate?.ToString("yyyy-MM-dd") ?? "-")</td>
+                            <td data-label="년차" class="d-none d-xl-table-cell">@(u.YearsOfService?.ToString() ?? "-")</td>
+                            <td data-label="연차">
                                 <span class="badge bg-primary">@Fmt.Day(u.RemainingAnnualLeave)</span>
                                 <small class="text-muted">/@Fmt.Day(u.TotalAnnualLeave)</small>
                             </td>
-                            <td class="d-none d-md-table-cell">
+                            <td data-label="포상">
                                 <span class="badge bg-success">@Fmt.Day(u.RemainingRewardLeave)</span>
                                 <small class="text-muted">/@Fmt.Day(u.RewardLeave)</small>
                             </td>
-                            <td>
+                            <td data-label="전체">
                                 <span class="badge bg-warning text-dark">@Fmt.Day(u.RemainingAnnualLeave + u.RemainingRewardLeave)</span>
-                                <small class="text-muted d-block">연+포</small>
+                                <small class="text-muted">연+포</small>
                             </td>
-                            <td>
+                            <td data-label="상태">
                                 @if (u.IsActive)
                                 {
                                     <span class="badge bg-success">재직</span>
@@ -90,13 +90,13 @@
                                     <span class="badge bg-secondary">퇴사</span>
                                 }
                             </td>
-                            <td>
+                            <td data-label="역할">
                                 @foreach (var role in GetRoles(u.Id))
                                 {
                                     <span class="badge bg-info text-dark me-1">@role</span>
                                 }
                             </td>
-                            <td>
+                            <td data-label="관리">
                                 <div class="d-flex flex-wrap gap-1">
                                     <button class="btn btn-sm btn-outline-primary" @onclick="() => EditUser(u)">편집</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenHistory(u)">내역</button>

@@ -129,13 +129,17 @@
 
                     <div class="alert alert-light py-2">
                         차감 예정 일수: <strong>@Fmt.Day(CalcLeaveDays())</strong> 일
-                        @if (leaveType is "연차" or "반차")
+                        @if (leaveType is "연차" or "반차" or "반반차")
                         {
                             <span class="text-muted ms-2">(남은 연차 @Fmt.Day(user?.RemainingAnnualLeave ?? 0)일)</span>
                         }
                         else if (leaveType == "포상휴가")
                         {
                             <span class="text-muted ms-2">(남은 포상 @Fmt.Day(user?.RemainingRewardLeave ?? 0)일)</span>
+                        }
+                        else if (leaveType == "병가")
+                        {
+                            <span class="text-muted ms-2">(남은 병가 @Fmt.Day(user?.RemainingSickLeave ?? 0)일)</span>
                         }
                     </div>
 
@@ -157,11 +161,11 @@
                     <p class="text-muted small mb-3">추가근무 시간을 입력하면 1.2배로 포상이 계산됩니다. 직접 수정도 가능합니다.</p>
 
                     <div class="row g-2 mb-3">
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="form-label">추가근무 시간</label>
                             <input type="number" step="0.5" class="form-control" @bind="workHours" @bind:after="CalcReward" />
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="form-label">포상 일수 <small class="text-muted">(시간×1.2÷8)</small></label>
                             <input type="number" step="0.01" class="form-control" @bind="rewardAmount" />
                         </div>

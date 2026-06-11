@@ -12,7 +12,11 @@
         <h2 class="fs-4 mb-0">페이지 사용 통계</h2>
         <button class="btn btn-outline-secondary btn-sm" @onclick="Load">🔄 새로고침</button>
     </div>
-    <small class="text-muted d-block mb-3">각 권한(직원·관리자·게스트)이 어떤 페이지를 얼마나 사용하는지 실시간 집계입니다.</small>
+    <small class="text-muted d-block mb-2">각 권한(직원·관리자·게스트)이 어떤 페이지를 얼마나 사용하는지 실시간 집계입니다.</small>
+    <div class="d-flex gap-3 mb-3 small flex-wrap">
+        <span><span style="display:inline-block;width:14px;height:14px;background:#5fa8d3;border-radius:3px;vertical-align:middle;"></span> 일반 페이지</span>
+        <span><span style="display:inline-block;width:14px;height:14px;background:#c88aab;border-radius:3px;vertical-align:middle;"></span> 관리자 전용 페이지</span>
+    </div>
 
     @if (stats == null)
     {

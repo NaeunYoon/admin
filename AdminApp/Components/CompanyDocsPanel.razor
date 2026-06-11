@@ -26,7 +26,7 @@
                 }
             </div>
 
-            <div class="d-flex gap-1 mb-3 flex-wrap">
+            <div class="docs-cat mb-3">
                 @foreach (var c in CategoryFilters)
                 {
                     var filter = c;
@@ -79,6 +79,14 @@
         align-items: center;
     }
     .docs-lock-icon { font-size: 2.5rem; opacity: 0.6; margin-bottom: 0.5rem; }
+
+    /* 카테고리 버튼: 데스크탑은 한 줄, 모바일은 3열 균등 그리드 */
+    .docs-cat { display: flex; gap: 4px; flex-wrap: wrap; }
+    .docs-cat .btn { flex: 0 0 auto; }
+    @@media (max-width: 768px) {
+        .docs-cat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        .docs-cat .btn { width: 100%; }
+    }
 </style>
 
 @* ---------- 상세 모달 ---------- *@

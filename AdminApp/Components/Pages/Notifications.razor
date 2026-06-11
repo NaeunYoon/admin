@@ -14,10 +14,16 @@
 <div class="container py-3" style="max-width: 880px;">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h2 class="fs-4 mb-0">알림함</h2>
-        @if (items != null && items.Any(n => !n.IsRead))
-        {
-            <button class="btn btn-sm btn-outline-secondary" @onclick="MarkAllRead">전체 읽음 처리</button>
-        }
+        <div class="d-flex gap-2">
+            @if (items != null && items.Any(n => !n.IsRead))
+            {
+                <button class="btn btn-sm btn-outline-secondary" @onclick="MarkAllRead">전체 읽음</button>
+            }
+            @if (items != null && items.Count > 0)
+            {
+                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAll">전체 삭제</button>
+            }
+        </div>
     </div>
 
     @* 설정 카드 *@
@@ -73,10 +79,9 @@
         <ul class="list-group">
             @foreach (var n in FilteredItems)
             {
-                <li class="list-group-item d-flex justify-content-between align-items-start @(n.IsRead ? "" : "notif-unread")"
-                    style="cursor: pointer;" @onclick="() => OpenItem(n)">
-                    <div class="flex-grow-1 me-2" style="min-width:0;">
-                        <div class="d-flex align-items-center gap-2 mb-1">
+                <li class="list-group-item d-flex justify-content-between align-items-start gap-2 @(n.IsRead ? "" : "notif-unread")">
+                    <div class="flex-grow-1" style="min-width:0; cursor: pointer;" @onclick="() => OpenItem(n)">
+                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                             @if (!n.IsRead)
                             {
                                 <span class="badge bg-danger">N</span>
@@ -87,9 +92,12 @@
                             }
                             <strong>@n.Title</strong>
                         </div>
-                        <div class="small text-muted" style="white-space: pre-wrap;">@n.Body</div>
+                        <div class="small text-muted" style="white-space: pre-wrap; word-break: break-word;">@n.Body</div>
                     </div>
-                    <small class="text-muted text-nowrap">@n.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                    <div class="d-flex flex-column align-items-end gap-1 flex-shrink-0">
+                        <small class="text-muted text-nowrap">@n.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                        <button class="btn btn-sm btn-link text-secondary p-0" title="삭제" @onclick="() => DeleteItem(n)">🗑</button>
+                    </div>
                 </li>
             }
         </ul>
@@ -170,6 +178,21 @@
             .ExecuteUpdateAsync(s => s
                 .SetProperty(x => x.IsRead, true)
                 .SetProperty(x => x.ReadAt, DateTime.UtcNow));
+        await Load();
+    }
+
+    private async Task DeleteItem(NotificationItem n)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.NotificationItems.Where(x => x.Id == n.Id).ExecuteDeleteAsync();
+        await Load();
+    }
+
+    private async Task DeleteAll()
+    {
+        if (userId == null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.NotificationItems.Where(x => x.UserId == userId).ExecuteDeleteAsync();
         await Load();
     }
 

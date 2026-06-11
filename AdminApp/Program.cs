@@ -55,6 +55,14 @@ public class Program
             })
             .AddIdentityCookies();
 
+        // 로그인 유지(자동 로그인) — "로그인 상태 유지" 체크 시 30일간 쿠키 유지 + 슬라이딩 연장.
+        builder.Services.ConfigureApplicationCookie(options =>
+        {
+            options.ExpireTimeSpan = TimeSpan.FromDays(30);
+            options.SlidingExpiration = true;
+            options.LoginPath = "/Account/Login";
+        });
+
         // DB — Blazor Server 동시성 문제 회피를 위해 DbContextFactory 사용.
         // 컴포넌트는 IDbContextFactory로 작업마다 독립 컨텍스트를 생성하고,
         // Identity(UserManager 등)는 팩토리에서 만든 scoped 컨텍스트를 사용.
@@ -148,6 +156,34 @@ public class Program
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
+
+        // 페이지 방문 통계 — 인증된 페이지 GET 요청을 역할별로 집계
+        app.Use(async (context, next) =>
+        {
+            await next();
+            try
+            {
+                if (HttpMethods.IsGet(context.Request.Method)
+                    && context.Response.StatusCode == 200
+                    && context.User?.Identity?.IsAuthenticated == true)
+                {
+                    var page = PageStatService.MapPage(context.Request.Path.Value ?? "");
+                    if (!string.IsNullOrEmpty(page))
+                    {
+                        var u = context.User;
+                        var role = u.IsInRole("Admin") ? "Admin"
+                                 : u.IsInRole("Employee") ? "Employee"
+                                 : u.IsInRole("Guest") ? "Guest" : null;
+                        if (role != null)
+                        {
+                            var svc = context.RequestServices.GetRequiredService<PageStatService>();
+                            _ = svc.RecordAsync(role, page);
+                        }
+                    }
+                }
+            }
+            catch { /* 통계 실패 무시 */ }
+        });
 
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();

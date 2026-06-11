@@ -58,8 +58,8 @@
     }
     else
     {
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
+        <div class="table-responsive mcard-wrap">
+            <table class="table table-sm table-hover align-middle mcard">
                 <thead class="table-light">
                     <tr>
                         <th role="button" @onclick='() => Sort("date")'>날짜 @SortIcon("date")</th>
@@ -81,13 +81,13 @@
                         @foreach (var r in Filtered)
                         {
                             <tr>
-                                <td>@r.WorkDate.ToString("MM-dd (ddd)")</td>
-                                <td><small>@r.EmployeeNumber</small></td>
-                                <td>@NameOf(r.UserId)</td>
-                                <td>@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
-                                <td>@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
-                                <td>@r.WorkDisplay</td>
-                                <td>
+                                <td data-label="날짜">@r.WorkDate.ToString("MM-dd (ddd)")</td>
+                                <td data-label="사번"><small>@r.EmployeeNumber</small></td>
+                                <td data-label="이름" class="mcard-head">@NameOf(r.UserId)</td>
+                                <td data-label="출근">@(r.CheckIn?.ToString("HH:mm") ?? "-")</td>
+                                <td data-label="퇴근">@(r.CheckOut?.ToString("HH:mm") ?? "-")</td>
+                                <td data-label="근무시간">@r.WorkDisplay</td>
+                                <td data-label="지각">
                                     @if (IsLate(r))
                                     {
                                         <span class="badge bg-danger">지각</span>
@@ -97,8 +97,8 @@
                                         <span class="badge bg-success">정상</span>
                                     }
                                 </td>
-                                <td><small class="text-muted">@r.Source</small></td>
-                                <td class="text-nowrap">
+                                <td data-label="출처"><small class="text-muted">@r.Source</small></td>
+                                <td data-label="관리" class="text-nowrap">
                                     <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEdit(r)">편집</button>
                                     <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRecord(r)">삭제</button>
                                 </td>
