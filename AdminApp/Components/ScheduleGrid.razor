@@ -18,6 +18,8 @@
     <span class="badge" style="background-color:#93c5fd; color:#000;">9시 출근</span>
     <span class="badge" style="background-color:#fdba74; color:#000;">10시 출근</span>
     <span class="badge bg-white text-danger border border-danger">🔴 지각</span>
+    <span class="badge bg-info text-dark">연차·병가·포상(휴무)</span>
+    <span class="badge bg-warning text-dark">반차·반반차</span>
     <span class="text-muted">· 셀 = 계획 출근~퇴근 · 빨간 테두리 = 실제 지각</span>
 </div>
 
@@ -59,19 +61,35 @@ else
                             var plannedStart = planned ?? empDefault;
                             var plannedEnd = scheduleMap.TryGetValue(key, out var s2) ? s2.EndTime : empDefault.AddHours(9);
                             var late = IsLateCell(emp.Id, d, plannedStart);
-                            <td style="background-color:@StartColor(plannedStart.Hour);"
-                                class="@(late ? "late-cell" : "")">
-                                <div class="fw-bold">@plannedStart.ToString("HH:mm")</div>
-                                <small class="text-muted">~@plannedEnd.ToString("HH:mm")</small>
-                                @if (late)
-                                {
-                                    <div class="late-tag">지각</div>
-                                }
-                                else if (planned == null)
-                                {
-                                    <div style="font-size:0.65rem; color:#aaa;">기본</div>
-                                }
-                            </td>
+                            var fullLeave = IsFullDayLeave(emp.Id, d);
+                            var leaveLbl = LeaveLabel(emp.Id, d);
+                            if (fullLeave)
+                            {
+                                <td class="leave-cell">
+                                    <span class="badge bg-info text-dark">@leaveLbl</span>
+                                    <div style="font-size:0.62rem; color:#999;">휴무</div>
+                                </td>
+                            }
+                            else
+                            {
+                                <td style="background-color:@StartColor(plannedStart.Hour);"
+                                    class="@(late ? "late-cell" : "")">
+                                    <div class="fw-bold">@plannedStart.ToString("HH:mm")</div>
+                                    <small class="text-muted">~@plannedEnd.ToString("HH:mm")</small>
+                                    @if (leaveLbl != null)
+                                    {
+                                        <div><span class="badge bg-warning text-dark leave-pill">@leaveLbl</span></div>
+                                    }
+                                    @if (late)
+                                    {
+                                        <div class="late-tag">지각</div>
+                                    }
+                                    else if (planned == null)
+                                    {
+                                        <div style="font-size:0.65rem; color:#aaa;">기본</div>
+                                    }
+                                </td>
+                            }
                         }
                     </tr>
                 }
@@ -88,6 +106,8 @@ else
     .sched-table .today-col { background: #e7f1ff; }
     .sched-table .late-cell { outline: 2px solid #dc3545; outline-offset: -2px; }
     .sched-table .late-tag { font-size: 0.65rem; font-weight: 700; color: #dc3545; }
+    .sched-table .leave-cell { background: #eef2f7; }
+    .sched-table .leave-pill { font-size: 0.58rem; padding: 1px 4px; margin-top: 2px; }
 </style>
 
 @code {
@@ -98,12 +118,35 @@ else
     private List<ApplicationUser> employees = new();
     private Dictionary<(string, DateOnly), WorkSchedule> scheduleMap = new();
     private Dictionary<(string, DateOnly), TimeOnly> attendanceMap = new();
+    private Dictionary<(string, DateOnly), (string Type, string? Period)> leaveMap = new();
     private bool loading = true;
 
     private static readonly TimeOnly DefaultStart = new(10, 0);
 
     private bool IsLateCell(string userId, DateOnly date, TimeOnly plannedStart) =>
         attendanceMap.TryGetValue((userId, date), out var checkIn) && checkIn > plannedStart;
+
+    // 종일 휴가(연차·병가, 시간대 없는 포상)면 그날은 출근 안 함 → 휴무 표시
+    private bool IsFullDayLeave(string userId, DateOnly d)
+    {
+        if (!leaveMap.TryGetValue((userId, d), out var lv)) return false;
+        if (lv.Type is "연차" or "병가") return true;
+        if (lv.Type == "포상휴가" && string.IsNullOrEmpty(lv.Period)) return true;
+        return false;
+    }
+
+    // 반차/반반차/시간대 있는 포상 = 부분 휴가 → 근무시간 옆에 라벨 표시
+    private string? LeaveLabel(string userId, DateOnly d)
+    {
+        if (!leaveMap.TryGetValue((userId, d), out var lv)) return null;
+        return lv.Type switch
+        {
+            "반차" => $"{lv.Period} 반차",        // 오전 반차 / 오후 반차
+            "반반차" => $"반반차 {lv.Period}",
+            "포상휴가" => string.IsNullOrEmpty(lv.Period) ? "포상휴가" : $"포상 {lv.Period}",
+            _ => lv.Type                            // 연차 / 병가
+        };
+    }
 
     private string RangeLabel => viewMode == "week"
         ? $"{days.FirstOrDefault():M/d} ~ {days.LastOrDefault():M/d}"
@@ -163,6 +206,16 @@ else
         attendanceMap = recs
             .GroupBy(r => (r.UserId!, r.WorkDate))
             .ToDictionary(g => g.Key, g => g.First().CheckIn!.Value);
+
+        // 승인된 휴가 → (직원, 날짜)별 매핑 (기간 휴가는 모든 날에 적용)
+        var leaves = await db.LeaveRequests.AsNoTracking()
+            .Where(l => l.Status == "승인" && l.UserId != null && l.StartDate <= last && l.EndDate >= first)
+            .ToListAsync();
+        leaveMap.Clear();
+        foreach (var lv in leaves)
+            for (var dt = lv.StartDate; dt <= lv.EndDate; dt = dt.AddDays(1))
+                if (dt >= first && dt <= last) leaveMap[(lv.UserId!, dt)] = (lv.LeaveType, lv.Period);
+
         loading = false;
     }
 

@@ -1,0 +1,18 @@
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: scon_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: scon1234
+      MYSQL_DATABASE: scon_pj
+      MYSQL_USER: scon
+      MYSQL_PASSWORD: scon1234
+    ports:
+      - "3307:3306"
+    volumes:
+      - scon_db_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  scon_db_data:

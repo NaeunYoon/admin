@@ -19,8 +19,34 @@
       dockerfile: Dockerfile
     container_name: admin_app
     restart: unless-stopped
+    environment:
+      TZ: Asia/Seoul
     ports:
       - "3100:8080"
+    depends_on:
+      - mariadb
+
+  # 프로젝트 관리(SCON_PJ) — React+Express. 같은 MariaDB의 scon_pj DB 사용.
+  # 어드민 우상단 '프로젝트 관리' 버튼 → /pm/launch → 이 컨테이너(:3101)로 SSO 진입.
+  pm:
+    build:
+      context: ./pm
+      dockerfile: Dockerfile
+    container_name: scon_pm
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Seoul
+      PORT: 3001
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: adminuser
+      DB_PASSWORD: 1020
+      DB_NAME: scon_pj
+      JWT_SECRET: scon_jwt_secret_key_2026
+    # 외부 포트 미노출 — 어드민(:3100)이 /pm 경로로 리버스 프록시해 접근
+    expose:
+      - "3001"
     depends_on:
       - mariadb
 

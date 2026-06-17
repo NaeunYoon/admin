@@ -6,6 +6,8 @@ using AdminApp.Components.Account;
 using AdminApp.Data;
 using AdminApp.Services;
 using ClosedXML.Excel;
+using Yarp.ReverseProxy.Configuration;
+using Yarp.ReverseProxy.Transforms;
 
 namespace AdminApp;
 
@@ -128,7 +130,34 @@ public class Program
         builder.Services.AddAuthorization(options =>
         {
             options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
+            // 프로젝트 관리(PM)는 Admin·Employee만 — 게스트(협력사)는 /pm 접근 자체를 차단
+            options.AddPolicy("PmAccess", policy => policy.RequireRole("Admin", "Employee"));
         });
+
+        // 프로젝트 관리(PM) 리버스 프록시 — /pm/* → PM 컨테이너. 어드민과 같은 origin/경로로 서빙.
+        var pmInternal = builder.Configuration["Pm:InternalUrl"] ?? "http://pm:3001";
+        builder.Services.AddReverseProxy().LoadFromMemory(
+            new[]
+            {
+                new Yarp.ReverseProxy.Configuration.RouteConfig
+                {
+                    RouteId = "pm",
+                    ClusterId = "pmCluster",
+                    AuthorizationPolicy = "PmAccess",   // 게스트 차단 (Admin·Employee만)
+                    Match = new Yarp.ReverseProxy.Configuration.RouteMatch { Path = "/pm/{**catch-all}" }
+                }.WithTransformPathRemovePrefix("/pm")
+            },
+            new[]
+            {
+                new Yarp.ReverseProxy.Configuration.ClusterConfig
+                {
+                    ClusterId = "pmCluster",
+                    Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig>
+                    {
+                        ["pm"] = new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = pmInternal }
+                    }
+                }
+            });
 
         var app = builder.Build();
 
@@ -321,6 +350,37 @@ public class Program
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 $"근태_{year}-{month:00}.xlsx");
         }).RequireAuthorization("AdminOnly");
+
+        // ========================== 프로젝트 관리(SCON_PJ) SSO ==========================
+        // 어드민 우상단 버튼 → 이 엔드포인트 → 핸드오프 JWT 발급 → 같은 origin의 /pm/?sso= 로 리다이렉트.
+        // /pm/* 는 위에서 등록한 YARP 리버스 프록시가 PM 컨테이너로 전달한다. (게스트 제외)
+        app.MapGet("/pm-launch", async (HttpContext ctx, UserManager<ApplicationUser> userManager, IConfiguration config) =>
+        {
+            var user = await userManager.GetUserAsync(ctx.User);
+            if (user == null) return Results.Challenge();
+
+            var roles = await userManager.GetRolesAsync(user);
+            var pmRole = roles.Contains("Admin") ? "admin" : "member";
+
+            var secret = config["Pm:JwtSecret"] ?? "";
+            if (string.IsNullOrEmpty(secret))
+                return Results.Problem("프로젝트 관리 연동이 구성되지 않았습니다. (Pm:JwtSecret)");
+
+            var token = PmTokenService.Mint(secret, new Dictionary<string, object>
+            {
+                ["id"]         = user.Id,
+                ["name"]       = user.KoreanName ?? user.UserName ?? user.Email ?? user.Id,
+                ["email"]      = user.Email ?? $"{user.Id}@intra.local",
+                ["role"]       = pmRole,
+                ["department"] = user.Department ?? "",
+            }, TimeSpan.FromMinutes(5));
+
+            // 상대 경로 → 리버스 프록시가 /pm 을 PM 컨테이너로 전달
+            return Results.Redirect($"/pm/?sso={Uri.EscapeDataString(token)}");
+        }).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = "Admin,Employee" });
+
+        // PM 리버스 프록시 (/pm/* → PM 컨테이너)
+        app.MapReverseProxy();
 
         app.Run();
     }

@@ -7,7 +7,11 @@
 
     <main>
         <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+            <AuthorizeView Roles="Admin,Employee">
+                <a class="btn btn-primary btn-sm" href="/pm-launch" target="_blank" rel="noopener" data-enhance-nav="false">
+                    프로젝트 관리
+                </a>
+            </AuthorizeView>
         </div>
 
         <article class="content px-4">

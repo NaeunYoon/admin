@@ -73,7 +73,8 @@
                 var col = dayIndex + 2;
                 <div class="reservation-block recurring-block"
                      style="grid-column:@col; grid-row:@startRow / span @spanSlots; background-color: @m.Color;"
-                     title="정기 회의 — 관리자 페이지에서 수정">
+                     @onclick="() => OpenEditRecurring(m, date)"
+                     title="정기 회의 — 클릭하여 편집">
                     <div class="r-title">🔁 @m.Title</div>
                     <div class="r-time">@m.StartTime.ToString("HH:mm")–@m.EndTime.ToString("HH:mm")</div>
                     <div class="r-by">정기</div>
@@ -114,7 +115,7 @@
         <div class="modal-dialog modal-dialog-centered" @onclick:stopPropagation="true" @onclick="NoOp">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(editing.Id == 0 ? "예약 추가" : "예약 편집")</h5>
+                    <h5 class="modal-title">@(editingRecurring ? "정기 회의 편집" : (editing.Id == 0 ? "예약 추가" : "예약 편집"))</h5>
                     <button type="button" class="btn-close" @onclick="Cancel"></button>
                 </div>
                 <div class="modal-body">
@@ -141,21 +142,33 @@
                             </select>
                         </div>
                     </div>
-                    <div class="mb-3 mt-3">
-                        <label class="form-label">참여 회사 <small class="text-muted">(중복 선택 가능)</small></label>
-                        <div class="d-flex gap-3 flex-wrap">
-                            @foreach (var co in CompanyOptions)
-                            {
-                                var name = co;
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="co-@name"
-                                           checked="@selectedCompanies.Contains(name)"
-                                           @onchange="(e) => ToggleCompany(name, (bool)e.Value!)" />
-                                    <label class="form-check-label" for="co-@name">@name</label>
-                                </div>
-                            }
-                        </div>
+                    @* 매주 반복 토글 — 켜면 정기 회의(매주), 끄면 일회성 *@
+                    <div class="form-check form-switch mt-3 mb-2">
+                        <input class="form-check-input" type="checkbox" id="recurToggle" @bind="isRecurring" />
+                        <label class="form-check-label" for="recurToggle">
+                            <strong>🔁 매주 반복 (정기 회의)</strong>
+                            <small class="text-muted d-block">켜면 매주 @(WeekdayKo(editing.Date.DayOfWeek))요일마다 자동 표시돼요. 끄면 이 날짜 1회성 예약입니다.</small>
+                        </label>
                     </div>
+
+                    @if (!isRecurring)
+                    {
+                        <div class="mb-3 mt-3">
+                            <label class="form-label">참여 회사 <small class="text-muted">(중복 선택 가능)</small></label>
+                            <div class="d-flex gap-3 flex-wrap">
+                                @foreach (var co in CompanyOptions)
+                                {
+                                    var name = co;
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="co-@name"
+                                               checked="@selectedCompanies.Contains(name)"
+                                               @onchange="(e) => ToggleCompany(name, (bool)e.Value!)" />
+                                        <label class="form-check-label" for="co-@name">@name</label>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
                     <div class="mb-3">
                         <label class="form-label">색상</label>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -291,12 +304,12 @@
     .reservation-block .r-by { font-size: 0.7rem; opacity: 0.8; }
     /* 정기 회의 — 점선 테두리 + 약간 흐림 → 일회성과 구분 */
     .reservation-block.recurring-block {
-        cursor: default;
+        cursor: pointer;
         opacity: 0.92;
         border: 2px dashed rgba(255,255,255,0.6);
         z-index: 1;  /* 일회성보다 뒤로 */
     }
-    .reservation-block.recurring-block:hover { transform: none; box-shadow: none; }
+    .reservation-block.recurring-block:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
 
     .color-swatch {
         width: 28px; height: 28px; border-radius: 50%;
@@ -311,6 +324,8 @@
     private List<RoomReservation>? reservations;
     private List<RecurringMeeting>? recurringMeetings;
     private RoomReservation? editing;
+    private bool isRecurring;        // 모달 토글: 켜면 정기 회의로 저장
+    private bool editingRecurring;   // 현재 편집 중인 항목이 정기 회의인지
     private string startTimeStr = "09:00";
     private string endTimeStr = "09:30";
 
@@ -418,6 +433,8 @@
             EndTime = defaultEnd,
             Color = PresetColors[0]
         };
+        editingRecurring = false;
+        isRecurring = false;
         selectedCompanies = new HashSet<string>();
         startTimeStr = slotStart.ToString("HH:mm");
         endTimeStr = defaultEnd.ToString("HH:mm");
@@ -440,6 +457,8 @@
             CreatedByName = r.CreatedByName,
             CreatedAt = r.CreatedAt
         };
+        editingRecurring = false;
+        isRecurring = false;
         selectedCompanies = (r.Companies ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(c => CompanyOptions.Contains(c))
@@ -449,7 +468,31 @@
         formError = null;
     }
 
-    private void Cancel() { editing = null; formError = null; }
+    // 정기 회의 블록 클릭 → 모달에 정기 회의 로드 (요일은 이 주의 해당 날짜로 표시)
+    private void OpenEditRecurring(RecurringMeeting m, DateOnly date)
+    {
+        editingRecurring = true;
+        isRecurring = true;
+        editing = new RoomReservation
+        {
+            Id = m.Id,
+            Date = date,
+            StartTime = m.StartTime,
+            EndTime = m.EndTime,
+            Title = m.Title,
+            Color = m.Color,
+            Notes = m.Notes,
+            CreatedById = m.CreatedById,
+            CreatedByName = m.CreatedByName,
+            CreatedAt = m.CreatedAt
+        };
+        selectedCompanies = new HashSet<string>();
+        startTimeStr = m.StartTime.ToString("HH:mm");
+        endTimeStr = m.EndTime.ToString("HH:mm");
+        formError = null;
+    }
+
+    private void Cancel() { editing = null; editingRecurring = false; isRecurring = false; formError = null; }
     private void NoOp() { /* 모달 내부 클릭 — propagation 차단 전용 */ }
 
     private bool CanModify(RoomReservation r) => isAdmin || (r.CreatedById != null && r.CreatedById == currentUserId);
@@ -482,52 +525,133 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            // 시간 겹침 검사 — 일회성
-            var clash = await db.RoomReservations.AsNoTracking()
-                .Where(x => x.Date == editing.Date && x.Id != editing.Id
-                            && x.StartTime < editing.EndTime && x.EndTime > editing.StartTime)
-                .FirstOrDefaultAsync();
-            if (clash != null)
+            if (isRecurring)
             {
-                formError = $"⛔ {clash.StartTime:HH:mm}-{clash.EndTime:HH:mm} \"{clash.Title}\" 와 시간이 겹칩니다.";
-                return;
-            }
-            // 정기 회의와도 겹침 검사
-            var recurringClash = await db.RecurringMeetings.AsNoTracking()
-                .Where(m => m.IsActive && m.DayOfWeek == editing.Date.DayOfWeek
-                            && m.StartTime < editing.EndTime && m.EndTime > editing.StartTime)
-                .FirstOrDefaultAsync();
-            if (recurringClash != null)
-            {
-                formError = $"⛔ 정기 회의 \"{recurringClash.Title}\" ({recurringClash.StartTime:HH:mm}-{recurringClash.EndTime:HH:mm})와 시간이 겹칩니다.";
-                return;
-            }
+                // ===== 정기 회의로 저장 =====
+                // 같은 요일 다른 정기 회의와 겹침 검사 (자기 자신 제외)
+                var recExcludeId = editingRecurring ? editing.Id : 0;
+                var rClash = await db.RecurringMeetings.AsNoTracking()
+                    .Where(m => m.IsActive && m.DayOfWeek == dow && m.Id != recExcludeId
+                                && m.StartTime < et && m.EndTime > st)
+                    .FirstOrDefaultAsync();
+                if (rClash != null)
+                {
+                    formError = $"⛔ 정기 회의 \"{rClash.Title}\" ({rClash.StartTime:HH:mm}-{rClash.EndTime:HH:mm})와 시간이 겹칩니다.";
+                    return;
+                }
 
-            if (editing.Id == 0)
-            {
-                editing.CreatedById = currentUserId;
-                editing.CreatedByName = currentUserName;
-                editing.CreatedAt = DateTime.UtcNow;
-                db.RoomReservations.Add(editing);
+                if (editingRecurring && editing.Id != 0)
+                {
+                    // 기존 정기 회의 수정
+                    if (!CanModify(editing)) { formError = "본인 등록 또는 관리자만 수정할 수 있습니다."; return; }
+                    var target = await db.RecurringMeetings.FindAsync(editing.Id);
+                    if (target == null) { saving = false; editing = null; editingRecurring = false; isRecurring = false; return; }
+                    target.DayOfWeek = dow;
+                    target.StartTime = st;
+                    target.EndTime = et;
+                    target.Title = editing.Title;
+                    target.Color = editing.Color;
+                    target.Notes = editing.Notes;
+                    target.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    // 새 정기 회의 (일회성→정기 변환이면 기존 일회성 삭제)
+                    if (!editingRecurring && editing.Id != 0)
+                    {
+                        if (!CanModify(editing)) { formError = "본인 예약 또는 관리자만 변환할 수 있습니다."; return; }
+                        await db.RoomReservations.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+                    }
+                    db.RecurringMeetings.Add(new RecurringMeeting
+                    {
+                        DayOfWeek = dow,
+                        StartTime = st,
+                        EndTime = et,
+                        Title = editing.Title!,
+                        Color = editing.Color,
+                        Notes = editing.Notes,
+                        IsActive = true,
+                        CreatedById = currentUserId,
+                        CreatedByName = currentUserName,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+                await db.SaveChangesAsync();
             }
             else
             {
-                var target = await db.RoomReservations.FindAsync(editing.Id);
-                if (target == null) { saving = false; editing = null; return; }
-                if (!CanModify(target)) { formError = "본인 예약 또는 관리자만 수정할 수 있습니다."; return; }
-                target.Date = editing.Date;
-                target.StartTime = editing.StartTime;
-                target.EndTime = editing.EndTime;
-                target.Title = editing.Title;
-                target.Color = editing.Color;
-                target.Notes = editing.Notes;
-                target.Companies = editing.Companies;
+                // ===== 일회성 예약으로 저장 =====
+                // 시간 겹침 검사 — 일회성 (정기→일회성 변환이면 자기 자신은 다른 테이블이라 제외 불필요)
+                var oneExcludeId = editingRecurring ? 0 : editing.Id;
+                var clash = await db.RoomReservations.AsNoTracking()
+                    .Where(x => x.Date == editing.Date && x.Id != oneExcludeId
+                                && x.StartTime < et && x.EndTime > st)
+                    .FirstOrDefaultAsync();
+                if (clash != null)
+                {
+                    formError = $"⛔ {clash.StartTime:HH:mm}-{clash.EndTime:HH:mm} \"{clash.Title}\" 와 시간이 겹칩니다.";
+                    return;
+                }
+                // 정기 회의와도 겹침 검사 (정기→일회성 변환 중이면 자기 자신 제외)
+                var recExcludeId = editingRecurring ? editing.Id : 0;
+                var recurringClash = await db.RecurringMeetings.AsNoTracking()
+                    .Where(m => m.IsActive && m.DayOfWeek == dow && m.Id != recExcludeId
+                                && m.StartTime < et && m.EndTime > st)
+                    .FirstOrDefaultAsync();
+                if (recurringClash != null)
+                {
+                    formError = $"⛔ 정기 회의 \"{recurringClash.Title}\" ({recurringClash.StartTime:HH:mm}-{recurringClash.EndTime:HH:mm})와 시간이 겹칩니다.";
+                    return;
+                }
+
+                if (editingRecurring && editing.Id != 0)
+                {
+                    // 정기 → 일회성 변환: 기존 정기 삭제 후 새 일회성 생성
+                    if (!CanModify(editing)) { formError = "본인 등록 또는 관리자만 변환할 수 있습니다."; return; }
+                    await db.RecurringMeetings.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+                    db.RoomReservations.Add(new RoomReservation
+                    {
+                        Date = editing.Date,
+                        StartTime = st,
+                        EndTime = et,
+                        Title = editing.Title,
+                        Color = editing.Color,
+                        Notes = editing.Notes,
+                        Companies = editing.Companies,
+                        CreatedById = currentUserId,
+                        CreatedByName = currentUserName,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+                else if (editing.Id == 0)
+                {
+                    editing.CreatedById = currentUserId;
+                    editing.CreatedByName = currentUserName;
+                    editing.CreatedAt = DateTime.UtcNow;
+                    db.RoomReservations.Add(editing);
+                }
+                else
+                {
+                    var target = await db.RoomReservations.FindAsync(editing.Id);
+                    if (target == null) { saving = false; editing = null; return; }
+                    if (!CanModify(target)) { formError = "본인 예약 또는 관리자만 수정할 수 있습니다."; return; }
+                    target.Date = editing.Date;
+                    target.StartTime = st;
+                    target.EndTime = et;
+                    target.Title = editing.Title;
+                    target.Color = editing.Color;
+                    target.Notes = editing.Notes;
+                    target.Companies = editing.Companies;
+                }
+                await db.SaveChangesAsync();
             }
-            await db.SaveChangesAsync();
         }
         finally { saving = false; }
 
         editing = null;
+        editingRecurring = false;
+        isRecurring = false;
         await Load();
     }
 
@@ -536,8 +660,13 @@
         if (editing == null || editing.Id == 0) return;
         if (!CanModify(editing)) { formError = "본인 예약 또는 관리자만 삭제할 수 있습니다."; return; }
         await using var db = await DbFactory.CreateDbContextAsync();
-        await db.RoomReservations.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+        if (editingRecurring)
+            await db.RecurringMeetings.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
+        else
+            await db.RoomReservations.Where(x => x.Id == editing.Id).ExecuteDeleteAsync();
         editing = null;
+        editingRecurring = false;
+        isRecurring = false;
         await Load();
     }
 
